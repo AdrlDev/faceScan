@@ -2,6 +2,8 @@ import cv2
 import tkinter as tk
 from PIL import Image, ImageTk  # type: ignore
 from .face_utils import face_detector, enroll, init_db
+import base64
+import numpy as np
 
 init_db()
 
@@ -15,16 +17,30 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
     # ✅ API MODE (no webcam)
     # ========================
     if images_base64 is not None:
-        gray = cv2.cvtColor(images_base64, cv2.COLOR_BGR2GRAY)
-        faces = face_detector.detectMultiScale(gray, 1.3, 5)
-
-        if len(faces) == 0:
-            return {"success": False, "message": "No face detected in uploaded image"}
-
         face_samples = []
-        for (x, y, w, h) in faces:
-            roi = gray[y:y+h, x:x+w]
-            face_samples.append(roi)
+
+        for img_b64 in images_base64:
+            try:
+                img_data = base64.b64decode(img_b64)
+                np_arr = np.frombuffer(img_data, np.uint8)
+                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+                if frame is None:
+                    continue
+
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = face_detector.detectMultiScale(gray, 1.3, 5)
+
+                for (x, y, w, h) in faces:
+                    roi = gray[y:y+h, x:x+w]
+                    face_samples.append(roi)
+
+            except Exception as e:
+                print(f"[ERROR] Failed to process one image: {e}")
+                continue
+
+        if not face_samples:
+            return {"success": False, "message": "No valid faces detected in uploaded images"}
 
         success, msg = enroll(name, id_number, face_samples)
         return {"success": success, "message": msg}
