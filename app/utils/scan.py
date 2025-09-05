@@ -4,8 +4,8 @@ import sqlite3
 import datetime
 import os
 import tkinter as tk
-from PIL import Image, ImageTk
-from face_utils import face_detector, recognizer, DB_PATH, TRAINER_FILE, init_db
+from PIL import Image, ImageTk # type: ignore
+from .face_utils import face_detector, recognizer, DB_PATH, TRAINER_FILE, init_db
 
 init_db()
 

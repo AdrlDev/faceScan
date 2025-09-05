@@ -1,7 +1,7 @@
 from fastapi import FastAPI, UploadFile, Form
 from pydantic import BaseModel
-from enroll import enroll_face
-from scan import scan_once
+from app.utils.enroll import enroll_face
+from app.utils.scan import scan_once
 
 app = FastAPI()
 

@@ -1,9 +1,12 @@
 # face_utils.py
 import cv2, os, sqlite3, datetime, numpy as np
 
-DB_PATH = "faces.db"
-DATASET_DIR = "dataset"
-TRAINER_FILE = "trainer.yml"
+# Base directory = app/utils/
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
+
+DB_PATH = os.path.join(BASE_DIR, "data", "faces.db")
+DATASET_DIR = os.path.join(BASE_DIR, "data", "dataset")
+TRAINER_FILE = os.path.join(BASE_DIR, "config", "trainer.yml")
 CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 
 os.makedirs(DATASET_DIR, exist_ok=True)

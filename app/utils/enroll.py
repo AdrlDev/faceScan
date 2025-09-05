@@ -1,7 +1,7 @@
 import cv2
 import tkinter as tk
-from PIL import Image, ImageTk
-from face_utils import face_detector, enroll, init_db
+from PIL import Image, ImageTk # type: ignore
+from .face_utils import face_detector, enroll, init_db
 
 init_db()
 
