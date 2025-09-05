@@ -1,18 +1,37 @@
 import cv2
 import tkinter as tk
-from PIL import Image, ImageTk # type: ignore
+from PIL import Image, ImageTk  # type: ignore
 from .face_utils import face_detector, enroll, init_db
 
 init_db()
 
-def enroll_face(name: str, id_number: str):
+def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
     """
-    Capture face samples from webcam and enroll user.
-    Auto close when scan is completed.
-    Camera feed is centered on screen with close instructions.
+    Enroll a face either from webcam (desktop mode) or from uploaded image (API mode).
     """
     init_db()
 
+    # ========================
+    # ✅ API MODE (no webcam)
+    # ========================
+    if images_base64 is not None:
+        gray = cv2.cvtColor(images_base64, cv2.COLOR_BGR2GRAY)
+        faces = face_detector.detectMultiScale(gray, 1.3, 5)
+
+        if len(faces) == 0:
+            return {"success": False, "message": "No face detected in uploaded image"}
+
+        face_samples = []
+        for (x, y, w, h) in faces:
+            roi = gray[y:y+h, x:x+w]
+            face_samples.append(roi)
+
+        success, msg = enroll(name, id_number, face_samples)
+        return {"success": success, "message": msg}
+
+    # ========================
+    # ✅ DESKTOP MODE (webcam)
+    # ========================
     cap = cv2.VideoCapture(0)
     count = 0
     face_samples = []
@@ -20,24 +39,21 @@ def enroll_face(name: str, id_number: str):
 
     print("[INFO] Starting face capture. Look at the camera...")
 
-    # ✅ Tkinter root window (borderless fullscreen)
+    # Tkinter fullscreen window
     root = tk.Tk()
     root.title("Enroll Face")
-    root.overrideredirect(True)  # remove title bar
+    root.overrideredirect(True)
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     root.geometry(f"{screen_width}x{screen_height}+0+0")
     root.configure(bg="black")
 
-    # ✅ Centered camera feed
     label = tk.Label(root, bg="black")
-    label.place(relx=0.5, rely=0.4, anchor="center")  # little higher to make space for text
+    label.place(relx=0.5, rely=0.4, anchor="center")
 
-    # ✅ Progress label below video
     progress_label = tk.Label(root, text="Captured: 0/20", font=("Arial", 18), fg="white", bg="black")
     progress_label.place(relx=0.5, rely=0.75, anchor="center")
 
-    # ✅ Instruction label below progress
     instruction_label = tk.Label(
         root,
         text="Scanning will close automatically.\nPress 'C' to close manually (after 100%).",
@@ -49,7 +65,6 @@ def enroll_face(name: str, id_number: str):
 
     def update_frame():
         nonlocal count, face_samples
-
         ret, frame = cap.read()
         if not ret:
             root.after(10, update_frame)
@@ -63,19 +78,16 @@ def enroll_face(name: str, id_number: str):
                 roi = gray[y:y+h, x:x+w]
                 face_samples.append(roi)
                 count += 1
-            cv2.rectangle(frame, (x,y), (x+w,y+h), (255,0,0), 2)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
 
-        # ✅ Update progress label instead of drawing text on frame
         progress_label.config(
             text=f"Captured: {count}/{total_samples}",
             fg="lime" if count >= total_samples else "red"
         )
 
-        # Convert OpenCV image to Tkinter
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(img)
 
-        # Resize to fit neatly in center
         max_w, max_h = screen_width // 2, screen_height // 2
         img.thumbnail((max_w, max_h))
 

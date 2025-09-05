@@ -1,25 +1,89 @@
-# scan.py
 import cv2
 import sqlite3
 import datetime
 import os
+import base64
+import numpy as np
 import tkinter as tk
-from PIL import Image, ImageTk # type: ignore
+from PIL import Image, ImageTk  # type: ignore
 from .face_utils import face_detector, recognizer, DB_PATH, TRAINER_FILE, init_db
 
 init_db()
 
-def scan_once():
-    # ✅ Check if trainer file exists first
+
+def scan_once(images_base64: list[str] = None):
+    """
+    Face scan:
+    - If images_base64 provided → process those (Render-compatible).
+    - Else → fallback to webcam + Tkinter UI (local dev only).
+    """
+
     if not os.path.exists(TRAINER_FILE):
         return {"status": "error", "message": "No enrolled faces found. Please enroll first."}
 
     recognizer.read(TRAINER_FILE)
 
+    # ✅ Cloud / API mode
+    if images_base64:
+        response = {"status": "error", "message": "No face detected"}
+        for img_b64 in images_base64:
+            try:
+                img_data = base64.b64decode(img_b64)
+                np_arr = np.frombuffer(img_data, np.uint8)
+                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+                faces = face_detector.detectMultiScale(gray, 1.3, 5)
+                if len(faces) == 0:
+                    continue
+
+                (x, y, w, h) = faces[0]
+                roi = gray[y:y + h, x:x + w]
+                id_, confidence = recognizer.predict(roi)
+                conf_score = round(100 - confidence)
+
+                con = sqlite3.connect(DB_PATH)
+                cur = con.cursor()
+                cur.execute("SELECT name, id_number FROM people WHERE id=?", (id_,))
+                result = cur.fetchone()
+                con.close()
+
+                if result and conf_score >= 70:
+                    name, id_number = result
+                    return {
+                        "status": "ok",
+                        "person_id": id_,
+                        "name": name,
+                        "id_number": id_number,
+                        "confidence": conf_score,
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }
+                elif result:
+                    response = {
+                        "status": "low_confidence",
+                        "name": result[0],
+                        "id_number": result[1],
+                        "confidence": conf_score,
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }
+                else:
+                    response = {
+                        "status": "ok",
+                        "message": "Unknown face",
+                        "confidence": conf_score,
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }
+
+            except Exception as e:
+                response = {"status": "error", "message": str(e)}
+
+        return response
+
+    # ✅ Local fallback mode with webcam + Tkinter
     cap = cv2.VideoCapture(0)
     response = {"status": "ok", "message": "No face detected"}  # default
 
-    # ✅ Tkinter window
+    # Tkinter window
     root = tk.Tk()
     root.title("Face Recognition")
     root.overrideredirect(True)  # borderless fullscreen
@@ -51,7 +115,7 @@ def scan_once():
 
         if len(faces) > 0:
             (x, y, w, h) = faces[0]
-            roi = gray[y:y+h, x:x+w]
+            roi = gray[y:y + h, x:x + w]
             id_, confidence = recognizer.predict(roi)
             conf_score = round(100 - confidence)
 
@@ -61,7 +125,7 @@ def scan_once():
             result = cur.fetchone()
             con.close()
 
-            if result and conf_score >= 70:  # ✅ require 70% or higher
+            if result and conf_score >= 70:
                 name, id_number = result
                 response = {
                     "status": "ok",
@@ -73,12 +137,10 @@ def scan_once():
                 }
                 result_text = f"{name} ({conf_score}%)"
                 color = "lime"
-
                 result_label.config(text=result_text, fg=color)
-                root.after(1500, root.destroy)  # ✅ close only on strong recognition
+                root.after(1500, root.destroy)
 
             elif result:
-                # Found person but confidence too low
                 response = {
                     "status": "low_confidence",
                     "name": result[0],
@@ -90,7 +152,6 @@ def scan_once():
                 result_label.config(text=result_text, fg="yellow")
 
             else:
-                # ✅ Unknown → keep scanning
                 response = {
                     "status": "ok",
                     "message": "Unknown face",
@@ -103,8 +164,6 @@ def scan_once():
         # Convert frame for Tkinter
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(img)
-
-        # Resize to center of screen
         img = img.resize((640, 480))
         imgtk = ImageTk.PhotoImage(image=img)
 
