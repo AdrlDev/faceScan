@@ -8,67 +8,53 @@ import numpy as np
 init_db()
 
 def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
-    """
-    Enroll a face either from webcam (desktop mode) or from uploaded image (API mode).
-    """
     init_db()
 
-    # ✅ NEW: check if user already enrolled
     if is_user_enrolled(id_number):
         return {"success": False, "message": f"User with ID {id_number} is already enrolled"}
-        
 
     # ========================
-    # ✅ API MODE (no webcam)
+    # API MODE
     # ========================
     if images_base64 is not None:
-        face_samples = []
+        face_samples_temp = []
 
         for img_b64 in images_base64:
             try:
                 img_data = base64.b64decode(img_b64)
                 np_arr = np.frombuffer(img_data, np.uint8)
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-
                 if frame is None:
                     continue
 
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = face_detector.detectMultiScale(gray, 1.3, 5)
-
                 for (x, y, w, h) in faces:
                     roi = gray[y:y+h, x:x+w]
-                    face_samples.append(roi)
-
+                    face_samples_temp.append(roi)
             except Exception as e:
                 print(f"[ERROR] Failed to process one image: {e}")
                 continue
 
-        if not face_samples:
+        if not face_samples_temp:
             return {"success": False, "message": "No valid faces detected in uploaded images"}
-        
-        # ✅ Check if face already exists in database
-        already, existing_id, conf = is_face_already_enrolled(face_samples)
-        if already:
-            return {
-                "success": False,
-                "message": f"Face already enrolled with ID {existing_id} (confidence {conf:.2f})"
-            }
 
-        success, msg = enroll(name, id_number, face_samples)
+        already, existing_id, conf = is_face_already_enrolled(face_samples_temp)
+        if already:
+            return {"success": False, "message": f"Face already enrolled with ID {existing_id} (confidence {conf:.2f})"}
+
+        success, msg = enroll(name, id_number, face_samples_temp)
         return {"success": success, "message": msg}
 
     # ========================
-    # ✅ DESKTOP MODE (webcam)
+    # DESKTOP MODE (webcam)
     # ========================
     cap = cv2.VideoCapture(0)
     count = 0
-    face_samples = []
-    total_samples = 20  # number of face samples required
+    face_samples_temp = []
+    total_samples = 20
+    cancelled = False  # flag to track cancellation
 
-    print("[INFO] Starting face capture. Look at the camera...")
-
-    # Tkinter fullscreen window
     root = tk.Tk()
     root.title("Enroll Face")
     root.overrideredirect(True)
@@ -92,8 +78,21 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
     )
     instruction_label.place(relx=0.5, rely=0.85, anchor="center")
 
+    # ✅ Cancel button
+    def cancel_enrollment():
+        nonlocal cancelled
+        cancelled = True
+        face_samples_temp.clear()  # discard all samples
+        root.destroy()
+
+    cancel_btn = tk.Button(root, text="Cancel", command=cancel_enrollment, font=("Arial", 14), bg="red", fg="white")
+    cancel_btn.place(relx=0.5, rely=0.9, anchor="center")
+
     def update_frame():
-        nonlocal count, face_samples
+        nonlocal count, face_samples_temp
+        if cancelled:
+            return  # stop updating frames if cancelled
+
         ret, frame = cap.read()
         if not ret:
             root.after(10, update_frame)
@@ -105,9 +104,9 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
         for (x, y, w, h) in faces:
             if count < total_samples:
                 roi = gray[y:y+h, x:x+w]
-                face_samples.append(roi)
+                face_samples_temp.append(roi)
                 count += 1
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
         progress_label.config(
             text=f"Captured: {count}/{total_samples}",
@@ -116,9 +115,7 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
 
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(img)
-
-        max_w, max_h = screen_width // 2, screen_height // 2
-        img.thumbnail((max_w, max_h))
+        img.thumbnail((screen_width // 2, screen_height // 2))
 
         imgtk = ImageTk.PhotoImage(image=img)
         label.imgtk = imgtk
@@ -126,7 +123,7 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
 
         if count >= total_samples:
             root.after(1000, root.destroy)
-        else:
+        elif not cancelled:
             root.after(10, update_frame)
 
     def on_key(event):
@@ -140,16 +137,15 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
     cap.release()
     cv2.destroyAllWindows()
 
-    if len(face_samples) >= total_samples:
-        # ✅ Check if face already exists before saving
-        already, existing_id, conf = is_face_already_enrolled(face_samples)
-        if already:
-            return {
-                "success": False,
-                "message": f"Face already enrolled with ID {existing_id} (confidence {conf:.2f})"
-            }
+    if cancelled:
+        return {"success": False, "message": "Enrollment cancelled by user"}
 
-        success, msg = enroll(name, id_number, face_samples)
+    if len(face_samples_temp) >= total_samples:
+        already, existing_id, conf = is_face_already_enrolled(face_samples_temp)
+        if already:
+            return {"success": False, "message": f"Face already enrolled with ID {existing_id} (confidence {conf:.2f})"}
+
+        success, msg = enroll(name, id_number, face_samples_temp)
         return {"success": success, "message": msg}
     else:
         return {"success": False, "message": "Face not fully scanned"}
