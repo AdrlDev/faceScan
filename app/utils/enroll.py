@@ -1,7 +1,7 @@
 import cv2
 import tkinter as tk
 from PIL import Image, ImageTk  # type: ignore
-from .face_utils import face_detector, enroll, init_db
+from .face_utils import face_detector, enroll, init_db, is_user_enrolled, is_face_already_enrolled
 import base64
 import numpy as np
 
@@ -12,6 +12,11 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
     Enroll a face either from webcam (desktop mode) or from uploaded image (API mode).
     """
     init_db()
+
+    # ✅ NEW: check if user already enrolled
+    if is_user_enrolled(id_number):
+        return {"success": False, "message": f"User with ID {id_number} is already enrolled"}
+        
 
     # ========================
     # ✅ API MODE (no webcam)
@@ -41,6 +46,14 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
 
         if not face_samples:
             return {"success": False, "message": "No valid faces detected in uploaded images"}
+        
+        # ✅ Check if face already exists in database
+        already, existing_id, conf = is_face_already_enrolled(face_samples)
+        if already:
+            return {
+                "success": False,
+                "message": f"Face already enrolled with ID {existing_id} (confidence {conf:.2f})"
+            }
 
         success, msg = enroll(name, id_number, face_samples)
         return {"success": success, "message": msg}

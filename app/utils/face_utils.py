@@ -67,3 +67,30 @@ def train_model():
     if face_samples:
         recognizer.train(face_samples, np.array(ids))
         recognizer.save(TRAINER_FILE)
+
+def is_user_enrolled(id_number: str) -> bool:
+    """Check if user with given ID is already in the database."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE id_number = ?", (id_number,))
+    exists = cursor.fetchone()[0] > 0
+    conn.close()
+    return exists
+
+def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: float = 70.0):
+    """
+    Check if a new face matches any existing enrolled faces.
+    Returns (True, id_number, confidence) if match found.
+    """
+    if not os.path.exists(TRAINER_FILE):
+        return False, None, None  # no training data yet
+
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.read(TRAINER_FILE)
+
+    for face in new_face_samples:
+        id_pred, confidence = recognizer.predict(face)
+        if confidence < threshold:
+            return True, id_pred, confidence  # match found
+
+    return False, None, None
