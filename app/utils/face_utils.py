@@ -99,7 +99,7 @@ def clear_all_faces():
     # ✅ Clear database
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM users")  # remove all enrolled users
+    cursor.execute("DELETE FROM people")  # remove all enrolled users
     conn.commit()
     conn.close()
 
