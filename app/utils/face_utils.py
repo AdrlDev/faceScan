@@ -72,7 +72,7 @@ def is_user_enrolled(id_number: str) -> bool:
     """Check if user with given ID is already in the database."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM users WHERE id_number = ?", (id_number,))
+    cursor.execute("SELECT COUNT(*) FROM people WHERE id_number = ?", (id_number,))
     exists = cursor.fetchone()[0] > 0
     conn.close()
     return exists
