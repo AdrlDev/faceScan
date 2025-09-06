@@ -141,6 +141,14 @@ def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
     cv2.destroyAllWindows()
 
     if len(face_samples) >= total_samples:
+        # ✅ Check if face already exists before saving
+        already, existing_id, conf = is_face_already_enrolled(face_samples)
+        if already:
+            return {
+                "success": False,
+                "message": f"Face already enrolled with ID {existing_id} (confidence {conf:.2f})"
+            }
+
         success, msg = enroll(name, id_number, face_samples)
         return {"success": success, "message": msg}
     else:
