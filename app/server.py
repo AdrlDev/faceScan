@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from app.utils.enroll import enroll_face
 from app.utils.scan import scan_once
+from app.utils.face_utils import clear_all_faces
 
 app = FastAPI()
 
@@ -43,3 +44,8 @@ async def api_scan(req: ScanRequest):
     images = req.images_base64
     result = scan_once(images)
     return result
+
+
+@app.post("/api/reset")
+async def clear_faces_api():
+    return clear_all_faces()

@@ -94,3 +94,17 @@ def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: floa
             return True, id_pred, confidence  # match found
 
     return False, None, None
+
+def clear_all_faces():
+    # ✅ Clear database
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users")  # remove all enrolled users
+    conn.commit()
+    conn.close()
+
+    # ✅ Delete trainer file (so no faces remain in recognizer)
+    if os.path.exists(TRAINER_FILE):
+        os.remove(TRAINER_FILE)
+
+    return {"success": True, "message": "All faces and database entries cleared"}
