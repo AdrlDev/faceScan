@@ -48,21 +48,13 @@ def scan_once(images_base64: list[str] = None):
                 result = cur.fetchone()
                 con.close()
 
-                if result and conf_score >= 70:
+                if result and conf_score >= 60:
                     name, id_number = result
                     return {
                         "status": "ok",
                         "person_id": id_,
                         "name": name,
                         "id_number": id_number,
-                        "confidence": conf_score,
-                        "timestamp": datetime.datetime.now().isoformat()
-                    }
-                elif result:
-                    response = {
-                        "status": "low_confidence",
-                        "name": result[0],
-                        "id_number": result[1],
                         "confidence": conf_score,
                         "timestamp": datetime.datetime.now().isoformat()
                     }
