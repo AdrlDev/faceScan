@@ -108,3 +108,49 @@ def clear_all_faces():
         os.remove(TRAINER_FILE)
 
     return {"success": True, "message": "All faces and database entries cleared"}
+
+def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 70.0):
+    """
+    Delete a user's face and database info by scanning their face.
+    Returns (True, message) if deletion successful.
+    """
+    if not os.path.exists(TRAINER_FILE):
+        return False, "No trained faces available."
+
+    recognizer.read(TRAINER_FILE)
+
+    for face in new_face_samples:
+        try:
+            person_id, confidence = recognizer.predict(face)
+            if confidence < threshold:
+                # ✅ Delete images from dataset
+                deleted_count = 0
+                for file in os.listdir(DATASET_DIR):
+                    if file.startswith(f"user.{person_id}."):
+                        os.remove(os.path.join(DATASET_DIR, file))
+                        deleted_count += 1
+
+                # ✅ Delete from database
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+
+                cursor.execute("SELECT name, id_number FROM people WHERE id = ?", (person_id,))
+                row = cursor.fetchone()
+                if row:
+                    name, id_number = row
+                else:
+                    name, id_number = None, None
+
+                cursor.execute("DELETE FROM people WHERE id = ?", (person_id,))
+                conn.commit()
+                conn.close()
+
+                # ✅ Retrain model
+                train_model()
+
+                return True, f"Deleted {name} ({id_number}) with {deleted_count} image(s)."
+
+        except Exception as e:
+            continue
+
+    return False, "No matching face found."

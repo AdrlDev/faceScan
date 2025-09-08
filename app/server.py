@@ -1,3 +1,4 @@
+import base64
 from fastapi import FastAPI, UploadFile, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -5,7 +6,7 @@ import cv2
 import numpy as np
 from app.utils.enroll import enroll_face
 from app.utils.scan import scan_once
-from app.utils.face_utils import clear_all_faces
+from app.utils.face_utils import clear_all_faces, delete_face_by_scan
 
 app = FastAPI()
 
@@ -49,3 +50,23 @@ async def api_scan(req: ScanRequest):
 @app.post("/api/reset")
 async def clear_faces_api():
     return clear_all_faces()
+
+@app.post("/api/delete-face")
+async def delete_face_api(req: ScanRequest):
+    """
+    Delete a specific enrolled user's face and data by scanning their face.
+    """
+    images = req.images_base64
+    if not images:
+        return {"success": False, "message": "No images provided for scanning."}
+
+    # Convert base64 images to grayscale numpy arrays
+    gray_faces = []
+    for img_b64 in images:
+        img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
+        img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        gray_faces.append(gray)
+
+    success, message = delete_face_by_scan(gray_faces)
+    return {"success": success, "message": message}
