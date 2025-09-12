@@ -80,7 +80,7 @@ def is_user_enrolled(id_number: str) -> bool:
 def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: float = 70.0):
     """
     Check if a new face matches any existing enrolled faces.
-    Returns (True, id_number, confidence) if match found.
+    Returns (True, id_number, confidence) if match found, else (False, None, None).
     """
     if not os.path.exists(TRAINER_FILE):
         return False, None, None  # no training data yet
@@ -88,12 +88,24 @@ def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: floa
     recognizer = cv2.face.LBPHFaceRecognizer_create()
     recognizer.read(TRAINER_FILE)
 
-    for face in new_face_samples:
-        id_pred, confidence = recognizer.predict(face)
-        if confidence < threshold:
-            return True, id_pred, confidence  # match found
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
 
-    return False, None, None
+    for face in new_face_samples:
+        try:
+            person_id, confidence = recognizer.predict(face)
+
+            if confidence < threshold:
+                # check if person_id actually exists
+                cursor.execute("SELECT id_number FROM people WHERE id = ?", (person_id,))
+                row = cursor.fetchone()
+                if row:
+                    return True, row[0], confidence  # ✅ real enrolled face found
+        except Exception:
+            continue
+
+    conn.close()
+    return False, None, None  # ✅ new face
 
 def clear_all_faces():
     # ✅ Clear database
