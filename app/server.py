@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from app.utils.enroll import enroll_face
 from app.utils.scan import scan_once
-from app.utils.face_utils import clear_all_faces, delete_face_by_scan
+from app.utils.face_utils import clear_all_faces, delete_face_by_scan, cancel_enrollment, start_enrollment, cancel_scan, start_scan
 
 app = FastAPI()
 
@@ -32,6 +32,7 @@ async def api_enroll(req: EnrollRequest):
     """
     Enroll a user by capturing their face through server webcam.
     """
+    start_enrollment()
     result = enroll_face(req.name, req.id_number, req.images_base64)
     return result
 
@@ -42,10 +43,22 @@ async def api_scan(req: ScanRequest):
     - If JSON with images_base64[] → process snapshots.
     - Else → open webcam (local only).
     """
+    start_scan()
     images = req.images_base64
     result = scan_once(images)
     return result
 
+@app.post("/api/cancel-scan")
+async def cancel_scan_api():
+    """Cancel the current scanning process."""
+    return cancel_scan()
+
+@app.post("/api/cancel-enroll")
+async def cancel_enroll_api():
+    """
+    Cancel current enrollment process.
+    """
+    return cancel_enrollment()
 
 @app.post("/api/reset")
 async def clear_faces_api():

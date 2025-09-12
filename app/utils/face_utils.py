@@ -13,6 +13,40 @@ os.makedirs(DATASET_DIR, exist_ok=True)
 face_detector = cv2.CascadeClassifier(CASCADE_PATH)
 recognizer = cv2.face.LBPHFaceRecognizer_create()
 
+# global flag to control enrollment
+enrollment_active = True
+scanning_active = True
+
+def start_scan():
+    """Mark scan session as active."""
+    global scanning_active
+    scanning_active = True
+
+def cancel_scan():
+    """Cancel current scan process."""
+    global scanning_active
+    scanning_active = False
+    return {"success": True, "message": "Scan process canceled."}
+
+def is_scanning_active():
+    """Check if scan is still active."""
+    return scanning_active
+
+def start_enrollment():
+    """Mark enrollment session as active."""
+    global enrollment_active
+    enrollment_active = True
+
+def cancel_enrollment():
+    """Cancel current enrollment process."""
+    global enrollment_active
+    enrollment_active = False
+    return {"success": True, "message": "Enrollment process canceled."}
+
+def is_enrollment_active():
+    """Check if enrollment is still active."""
+    return enrollment_active
+
 def init_db():
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
@@ -37,6 +71,10 @@ def enroll(name, id_number, gray_faces, person_id=None):
     """
     Save detected faces (grayscale ROIs) for a person and retrain the model.
     """
+    global enrollment_active
+    if not enrollment_active:
+        return False, "Enrollment was canceled."
+
     con = sqlite3.connect(DB_PATH)
     cur = con.cursor()
 
@@ -49,6 +87,9 @@ def enroll(name, id_number, gray_faces, person_id=None):
 
     count = 0
     for roi in gray_faces:
+        if not enrollment_active:  # 👈 stop mid-process if canceled
+            return False, "Enrollment was canceled during process."
+
         path = os.path.join(DATASET_DIR, f"user.{person_id}.{count}.jpg")
         cv2.imwrite(path, roi)
         count += 1

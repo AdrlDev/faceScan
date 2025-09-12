@@ -6,7 +6,7 @@ import base64
 import numpy as np
 import tkinter as tk
 from PIL import Image, ImageTk  # type: ignore
-from .face_utils import face_detector, recognizer, DB_PATH, TRAINER_FILE, init_db
+from .face_utils import face_detector, recognizer, DB_PATH, TRAINER_FILE, init_db, is_scanning_active
 
 init_db()
 
@@ -27,6 +27,9 @@ def scan_once(images_base64: list[str] = None):
     if images_base64:
         response = {"status": "error", "message": "No face detected"}
         for img_b64 in images_base64:
+            if not is_scanning_active():
+                return {"status": "canceled", "message": "Scan canceled by user"}
+
             try:
                 img_data = base64.b64decode(img_b64)
                 np_arr = np.frombuffer(img_data, np.uint8)
@@ -96,6 +99,11 @@ def scan_once(images_base64: list[str] = None):
 
     def update_frame():
         nonlocal response
+
+        if not is_scanning_active():
+            root.destroy()
+            response = {"status": "canceled", "message": "Scan canceled by user"}
+            return
 
         ret, frame = cap.read()
         if not ret:
