@@ -156,18 +156,18 @@ def clear_all_faces():
     conn.commit()
     conn.close()
 
-     # ✅ Clear dataset folder
+    # ✅ Delete trainer file
+    if os.path.exists(TRAINER_FILE):
+        os.remove(TRAINER_FILE)
+
+    # ✅ Clear dataset directory
     if os.path.exists(DATASET_DIR):
         for file in os.listdir(DATASET_DIR):
             file_path = os.path.join(DATASET_DIR, file)
             if os.path.isfile(file_path):
                 os.remove(file_path)
 
-    # ✅ Delete trainer file (so no faces remain in recognizer)
-    if os.path.exists(TRAINER_FILE):
-        os.remove(TRAINER_FILE)
-
-    return {"success": True, "message": "All faces and database entries cleared"}
+    return {"success": True, "message": "All faces, dataset images, and database entries cleared"}
 
 def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 70.0):
     """
