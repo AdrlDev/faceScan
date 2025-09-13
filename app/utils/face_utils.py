@@ -164,8 +164,9 @@ def clear_all_faces():
 
 def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 70.0):
     """
-    Delete a user's face and database info by scanning their face.
-    Returns (True, message) if deletion successful.
+    Strict deletion:
+    - Only delete if both dataset images AND DB record exist for the scanned face.
+    - Returns (True, message) if deletion successful, (False, message) otherwise.
     """
     if not os.path.exists(TRAINER_FILE):
         return False, "No trained faces available."
@@ -175,7 +176,21 @@ def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 7
     for face in new_face_samples:
         try:
             person_id, confidence = recognizer.predict(face)
+
             if confidence < threshold:
+                conn = sqlite3.connect(DB_PATH)
+                cursor = conn.cursor()
+
+                # ✅ Check if this person exists in DB first
+                cursor.execute("SELECT name, id_number FROM people WHERE id = ?", (person_id,))
+                row = cursor.fetchone()
+
+                if not row:
+                    conn.close()
+                    return False, f"No database record found for person_id {person_id}. Deletion aborted."
+
+                name, id_number = row
+
                 # ✅ Delete images from dataset
                 deleted_count = 0
                 for file in os.listdir(DATASET_DIR):
@@ -183,27 +198,22 @@ def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 7
                         os.remove(os.path.join(DATASET_DIR, file))
                         deleted_count += 1
 
+                if deleted_count == 0:
+                    conn.close()
+                    return False, f"No dataset images found for {name} ({id_number}). Deletion aborted."
+
                 # ✅ Delete from database
-                conn = sqlite3.connect(DB_PATH)
-                cursor = conn.cursor()
-
-                cursor.execute("SELECT name, id_number FROM people WHERE id = ?", (person_id,))
-                row = cursor.fetchone()
-                if row:
-                    name, id_number = row
-                else:
-                    name, id_number = None, None
-
                 cursor.execute("DELETE FROM people WHERE id = ?", (person_id,))
                 conn.commit()
                 conn.close()
 
-                # ✅ Retrain model
+                # ✅ Retrain model after deletion
                 train_model()
 
                 return True, f"Deleted {name} ({id_number}) with {deleted_count} image(s)."
 
-        except Exception as e:
+        except Exception:
             continue
 
     return False, "No matching face found."
+
