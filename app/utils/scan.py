@@ -51,7 +51,7 @@ def scan_once(images_base64: list[str] = None):
                 result = cur.fetchone()
                 con.close()
 
-                if result and conf_score >= 60:
+                if result and conf_score >= 85:
                     name, id_number = result
                     return {
                         "status": "ok",
@@ -125,7 +125,7 @@ def scan_once(images_base64: list[str] = None):
             result = cur.fetchone()
             con.close()
 
-            if result and conf_score >= 70:
+            if result and conf_score >= 85:
                 name, id_number = result
                 response = {
                     "status": "ok",
