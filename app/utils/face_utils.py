@@ -156,6 +156,13 @@ def clear_all_faces():
     conn.commit()
     conn.close()
 
+     # ✅ Clear dataset folder
+    if os.path.exists(DATASET_DIR):
+        for file in os.listdir(DATASET_DIR):
+            file_path = os.path.join(DATASET_DIR, file)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+
     # ✅ Delete trainer file (so no faces remain in recognizer)
     if os.path.exists(TRAINER_FILE):
         os.remove(TRAINER_FILE)
