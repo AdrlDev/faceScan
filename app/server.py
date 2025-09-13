@@ -27,6 +27,10 @@ class EnrollRequest(BaseModel):
 class ScanRequest(BaseModel):
     images_base64: list[str] | None = None   # optional, if frontend sends snapshot
 
+class ScanDeleteRequest(BaseModel):
+    images_base64: list[str] | None = None   # optional, if frontend sends snapshot
+    id_number: str
+
 @app.post("/api/enroll")
 async def api_enroll(req: EnrollRequest):
     """
@@ -65,11 +69,13 @@ async def clear_faces_api():
     return clear_all_faces()
 
 @app.post("/api/delete-face")
-async def delete_face_api(req: ScanRequest):
+async def delete_face_api(req: ScanDeleteRequest):
     """
     Delete a specific enrolled user's face and data by scanning their face.
     """
     images = req.images_base64
+    id_number = req.id_number
+
     if not images:
         return {"success": False, "message": "No images provided for scanning."}
 
@@ -81,5 +87,5 @@ async def delete_face_api(req: ScanRequest):
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         gray_faces.append(gray)
 
-    success, message = delete_face_by_scan(gray_faces)
+    success, message = delete_face_by_scan(gray_faces,id_number)
     return {"success": success, "message": message}

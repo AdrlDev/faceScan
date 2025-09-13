@@ -172,7 +172,7 @@ def clear_all_faces():
 
     return {"success": True, "message": "All faces, dataset images, and database entries cleared"}
 
-def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 90):
+def delete_face_by_scan(new_face_samples: list[np.ndarray], id_number: str, threshold: float = 90):
     """
     Deletes a face strictly:
     - Only if dataset images and DB record exist.
@@ -189,7 +189,7 @@ def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 9
             if distance < threshold:
                 conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
-                cursor.execute("SELECT name, id_number FROM people WHERE id=?", (person_id,))
+                cursor.execute("SELECT name, id_number FROM people WHERE id=? AND id_number=?", (person_id,id_number,))
                 row = cursor.fetchone()
                 if not row:
                     conn.close()
