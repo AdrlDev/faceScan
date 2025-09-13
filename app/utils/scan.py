@@ -24,8 +24,8 @@ def scan_once(images_base64: list[str] = None):
     recognizer.read(TRAINER_FILE)
 
     # Distance thresholds
-    HIGH_CONF_DIST = 60
-    LOW_CONF_DIST = 120
+    HIGH_CONF_DIST = 50
+    LOW_CONF_DIST = 80
 
     # ✅ Cloud / API mode
     if images_base64:
