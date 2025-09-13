@@ -29,7 +29,7 @@ def scan_once(images_base64: list[str] = None):
 
     def classify_face(distance):
         if distance < HIGH_CONF_DIST:
-            return "high_confidence"
+            return "ok"
         elif distance < LOW_CONF_DIST:
             return "low_confidence"
         else:
