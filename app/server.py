@@ -1,5 +1,5 @@
 import base64
-from fastapi import FastAPI, UploadFile, Form
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import cv2
@@ -70,22 +70,26 @@ async def clear_faces_api():
 
 @app.post("/api/delete-face")
 async def delete_face_api(req: ScanDeleteRequest):
-    """
-    Delete a specific enrolled user's face and data by scanning their face.
-    """
-    images = req.images_base64
-    id_number = req.id_number
+    if not req.images_base64:
+        raise HTTPException(status_code=400, detail="No images provided for scanning.")
 
-    if not images:
-        return {"success": False, "message": "No images provided for scanning."}
-
-    # Convert base64 images to grayscale numpy arrays
     gray_faces = []
-    for img_b64 in images:
-        img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
-        img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        gray_faces.append(gray)
+    for img_b64 in req.images_base64:
+        try:
+            img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
+            img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            gray_faces.append(gray)
+        except Exception as e:
+            # Skip invalid images but log
+            print(f"Failed to decode an image: {e}")
+            continue
 
-    success, message = delete_face_by_scan(gray_faces,id_number)
-    return {"success": success, "message": message}
+    if not gray_faces:
+        return {"success": False, "message": "No valid images could be decoded."}
+
+    try:
+        success, message = delete_face_by_scan(gray_faces, req.id_number)
+        return {"success": success, "message": message}
+    except Exception as e:
+        return {"success": False, "message": f"Error during deletion: {e}"}
