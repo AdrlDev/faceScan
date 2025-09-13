@@ -6,7 +6,10 @@ BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
 DB_PATH = os.path.join(BASE_DIR, "data", "faces.db")
 DATASET_DIR = os.path.join(BASE_DIR, "data", "dataset")
-TRAINER_FILE = os.path.join(BASE_DIR, "config", "trainer.yml")
+CONFIG_DIR = os.path.join(BASE_DIR, "config")   # ✅ Add this
+os.makedirs(CONFIG_DIR, exist_ok=True)          # ✅ Ensure config folder exists
+
+TRAINER_FILE = os.path.join(CONFIG_DIR, "trainer.yml")
 CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 
 os.makedirs(DATASET_DIR, exist_ok=True)
