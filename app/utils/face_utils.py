@@ -172,7 +172,7 @@ def clear_all_faces():
 
     return {"success": True, "message": "All faces, dataset images, and database entries cleared"}
 
-def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 70.0):
+def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 60.0):
     """
     Strict deletion:
     - Only delete if both dataset images AND DB record exist for the scanned face.
