@@ -10,26 +10,77 @@ from .face_utils import face_detector, recognizer, DB_PATH, TRAINER_FILE, init_d
 
 init_db()
 
+# Distance thresholds (LBPH: lower distance = higher confidence)
+HIGH_CONF_DIST = 50      # very confident
+LOW_CONF_DIST = 90       # somewhat confident
+MAX_DIST = 120           # above this = unknown
 
 def scan_once(images_base64: list[str] = None):
     """
-    Face scan:
-    - If images_base64 provided → process those (Render-compatible).
-    - Else → fallback to webcam + Tkinter UI (local dev only).
+    Perform face recognition:
+    - images_base64 → API/Render mode
+    - None → fallback to webcam + Tkinter
+    Returns structured result with confidence level.
     """
-
     if not os.path.exists(TRAINER_FILE):
         return {"status": "error", "message": "No enrolled faces found. Please enroll first."}
 
     recognizer.read(TRAINER_FILE)
 
-    # Distance thresholds
-    HIGH_CONF_DIST = 50
-    LOW_CONF_DIST = 80
+    def classify_face(distance):
+        if distance < HIGH_CONF_DIST:
+            return "high_confidence"
+        elif distance < LOW_CONF_DIST:
+            return "low_confidence"
+        else:
+            return "unknown"
 
-    # ✅ Cloud / API mode
+    def process_frame(frame):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        faces = face_detector.detectMultiScale(gray, 1.3, 5)
+        if len(faces) == 0:
+            return None
+
+        x, y, w, h = faces[0]
+        roi = gray[y:y + h, x:x + w]
+        person_id, distance = recognizer.predict(roi)
+
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT name, id_number FROM people WHERE id=?", (person_id,))
+        result = cur.fetchone()
+        conn.close()
+
+        if result:
+            name, id_number = result
+            status = classify_face(distance)
+            if status == "high_confidence":
+                message = f"Recognized {name} with high confidence"
+            elif status == "low_confidence":
+                message = f"Recognized {name} with lower confidence"
+            else:
+                message = "Unknown face"
+
+            return {
+                "status": status,
+                "person_id": person_id,
+                "name": name,
+                "id_number": id_number,
+                "distance": distance,
+                "message": message,
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+        else:
+            return {
+                "status": "unknown",
+                "distance": distance,
+                "message": "Unknown face",
+                "timestamp": datetime.datetime.now().isoformat()
+            }
+
+    # --- Cloud/API mode ---
     if images_base64:
-        response = {"status": "error", "message": "No face detected"}
+        response = {"status": "unknown", "message": "No face detected"}
         for img_b64 in images_base64:
             if not is_scanning_active():
                 return {"status": "canceled", "message": "Scan canceled by user"}
@@ -38,61 +89,17 @@ def scan_once(images_base64: list[str] = None):
                 img_data = base64.b64decode(img_b64)
                 np_arr = np.frombuffer(img_data, np.uint8)
                 frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-                faces = face_detector.detectMultiScale(gray, 1.3, 5)
-                if len(faces) == 0:
-                    continue
-
-                (x, y, w, h) = faces[0]
-                roi = gray[y:y + h, x:x + w]
-                id_, distance = recognizer.predict(roi)
-
-                con = sqlite3.connect(DB_PATH)
-                cur = con.cursor()
-                cur.execute("SELECT name, id_number FROM people WHERE id=?", (id_,))
-                result = cur.fetchone()
-                con.close()
-
+                result = process_frame(frame)
                 if result:
-                    name, id_number = result
-                    if distance < HIGH_CONF_DIST:
-                        return {
-                            "status": "ok",
-                            "person_id": id_,
-                            "name": name,
-                            "id_number": id_number,
-                            "distance": distance,
-                            "timestamp": datetime.datetime.now().isoformat()
-                        }
-                    elif distance < LOW_CONF_DIST:
-                        return {
-                            "status": "low_confidence",
-                            "name": name,
-                            "id_number": id_number,
-                            "distance": distance,
-                            "message": "Recognition has lower confidence",
-                            "timestamp": datetime.datetime.now().isoformat()
-                        }
-
-                # Unknown face
-                response = {
-                    "status": "unknown",
-                    "message": "Unknown face",
-                    "distance": distance,
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
-
+                    return result
             except Exception as e:
                 response = {"status": "error", "message": str(e)}
-
         return response
 
-    # ✅ Local fallback with webcam + Tkinter
+    # --- Local webcam mode ---
     cap = cv2.VideoCapture(0)
-    response = {"status": "ok", "message": "No face detected"}  # default
+    response = {"status": "unknown", "message": "No face detected"}
 
-    # Tkinter window
     root = tk.Tk()
     root.title("Face Recognition")
     root.overrideredirect(True)
@@ -108,7 +115,6 @@ def scan_once(images_base64: list[str] = None):
 
     def update_frame():
         nonlocal response
-
         if not is_scanning_active():
             root.destroy()
             response = {"status": "canceled", "message": "Scan canceled by user"}
@@ -119,51 +125,17 @@ def scan_once(images_base64: list[str] = None):
             root.after(10, update_frame)
             return
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_detector.detectMultiScale(gray, 1.3, 5)
-
-        if len(faces) > 0:
-            (x, y, w, h) = faces[0]
-            roi = gray[y:y + h, x:x + w]
-            id_, distance = recognizer.predict(roi)
-
-            con = sqlite3.connect(DB_PATH)
-            cur = con.cursor()
-            cur.execute("SELECT name, id_number FROM people WHERE id=?", (id_,))
-            result = cur.fetchone()
-            con.close()
-
-            if result:
-                name, id_number = result
-                if distance < HIGH_CONF_DIST:
-                    response = {
-                        "status": "ok",
-                        "person_id": id_,
-                        "name": name,
-                        "id_number": id_number,
-                        "distance": distance,
-                        "timestamp": datetime.datetime.now().isoformat()
-                    }
-                    result_label.config(text=f"{name} (High confidence)", fg="lime")
-                    root.after(1500, root.destroy)
-                elif distance < LOW_CONF_DIST:
-                    response = {
-                        "status": "low_confidence",
-                        "name": name,
-                        "id_number": id_number,
-                        "distance": distance,
-                        "message": "Recognition has lower confidence",
-                        "timestamp": datetime.datetime.now().isoformat()
-                    }
-                    result_label.config(text=f"{name} (Low confidence)", fg="yellow")
-                else:
-                    response = {
-                        "status": "unknown",
-                        "message": "Unknown face",
-                        "distance": distance,
-                        "timestamp": datetime.datetime.now().isoformat()
-                    }
-                    result_label.config(text=f"Unknown", fg="red")
+        result = process_frame(frame)
+        if result:
+            response = result
+            # Update Tkinter label colors
+            if response["status"] == "high_confidence":
+                result_label.config(text=response["message"], fg="lime")
+                root.after(1500, root.destroy)
+            elif response["status"] == "low_confidence":
+                result_label.config(text=response["message"], fg="yellow")
+            else:
+                result_label.config(text=response["message"], fg="red")
 
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(img).resize((640, 480))

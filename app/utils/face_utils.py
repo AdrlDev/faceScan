@@ -172,11 +172,11 @@ def clear_all_faces():
 
     return {"success": True, "message": "All faces, dataset images, and database entries cleared"}
 
-def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 60.0):
+def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 90):
     """
-    Strict deletion:
-    - Only delete if both dataset images AND DB record exist for the scanned face.
-    - Returns (True, message) if deletion successful, (False, message) otherwise.
+    Deletes a face strictly:
+    - Only if dataset images and DB record exist.
+    - Uses threshold distance for safe deletion.
     """
     if not os.path.exists(TRAINER_FILE):
         return False, "No trained faces available."
@@ -185,23 +185,18 @@ def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 6
 
     for face in new_face_samples:
         try:
-            person_id, confidence = recognizer.predict(face)
-
-            if confidence < threshold:
+            person_id, distance = recognizer.predict(face)
+            if distance < threshold:
                 conn = sqlite3.connect(DB_PATH)
                 cursor = conn.cursor()
-
-                # ✅ Check if this person exists in DB first
-                cursor.execute("SELECT name, id_number FROM people WHERE id = ?", (person_id,))
+                cursor.execute("SELECT name, id_number FROM people WHERE id=?", (person_id,))
                 row = cursor.fetchone()
-
                 if not row:
                     conn.close()
-                    return False, f"No database record found for person_id {person_id}. Deletion aborted."
+                    return False, f"No database record found for person_id {person_id}"
 
                 name, id_number = row
 
-                # ✅ Delete images from dataset
                 deleted_count = 0
                 for file in os.listdir(DATASET_DIR):
                     if file.startswith(f"user.{person_id}."):
@@ -210,16 +205,13 @@ def delete_face_by_scan(new_face_samples: list[np.ndarray], threshold: float = 6
 
                 if deleted_count == 0:
                     conn.close()
-                    return False, f"No dataset images found for {name} ({id_number}). Deletion aborted."
+                    return False, f"No dataset images found for {name} ({id_number})"
 
-                # ✅ Delete from database
-                cursor.execute("DELETE FROM people WHERE id = ?", (person_id,))
+                cursor.execute("DELETE FROM people WHERE id=?", (person_id,))
                 conn.commit()
                 conn.close()
 
-                # ✅ Retrain model after deletion
                 train_model()
-
                 return True, f"Deleted {name} ({id_number}) with {deleted_count} image(s)."
 
         except Exception:
