@@ -54,7 +54,7 @@ def scan_once(images_base64: list[str] = None):
         if result:
             name, id_number = result
             status = classify_face(distance)
-            if status == "high_confidence":
+            if status == "ok":
                 message = f"Recognized {name} with high confidence"
             elif status == "low_confidence":
                 message = f"Recognized {name} with lower confidence"
