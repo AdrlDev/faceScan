@@ -23,6 +23,10 @@ def scan_once(images_base64: list[str] = None):
 
     recognizer.read(TRAINER_FILE)
 
+    # Distance thresholds
+    HIGH_CONF_DIST = 60
+    LOW_CONF_DIST = 120
+
     # ✅ Cloud / API mode
     if images_base64:
         response = {"status": "error", "message": "No face detected"}
@@ -42,8 +46,7 @@ def scan_once(images_base64: list[str] = None):
 
                 (x, y, w, h) = faces[0]
                 roi = gray[y:y + h, x:x + w]
-                id_, confidence = recognizer.predict(roi)
-                conf_score = round(100 - confidence)
+                id_, distance = recognizer.predict(roi)
 
                 con = sqlite3.connect(DB_PATH)
                 cur = con.cursor()
@@ -51,49 +54,55 @@ def scan_once(images_base64: list[str] = None):
                 result = cur.fetchone()
                 con.close()
 
-                if result and conf_score >= 85:
+                if result:
                     name, id_number = result
-                    return {
-                        "status": "ok",
-                        "person_id": id_,
-                        "name": name,
-                        "id_number": id_number,
-                        "confidence": conf_score,
-                        "timestamp": datetime.datetime.now().isoformat()
-                    }
-                else:
-                    response = {
-                        "status": "ok",
-                        "message": "Unknown face",
-                        "confidence": conf_score,
-                        "timestamp": datetime.datetime.now().isoformat()
-                    }
+                    if distance < HIGH_CONF_DIST:
+                        return {
+                            "status": "ok",
+                            "person_id": id_,
+                            "name": name,
+                            "id_number": id_number,
+                            "distance": distance,
+                            "timestamp": datetime.datetime.now().isoformat()
+                        }
+                    elif distance < LOW_CONF_DIST:
+                        return {
+                            "status": "low_confidence",
+                            "name": name,
+                            "id_number": id_number,
+                            "distance": distance,
+                            "message": "Recognition has lower confidence",
+                            "timestamp": datetime.datetime.now().isoformat()
+                        }
+
+                # Unknown face
+                response = {
+                    "status": "unknown",
+                    "message": "Unknown face",
+                    "distance": distance,
+                    "timestamp": datetime.datetime.now().isoformat()
+                }
 
             except Exception as e:
                 response = {"status": "error", "message": str(e)}
 
         return response
 
-    # ✅ Local fallback mode with webcam + Tkinter
+    # ✅ Local fallback with webcam + Tkinter
     cap = cv2.VideoCapture(0)
     response = {"status": "ok", "message": "No face detected"}  # default
 
     # Tkinter window
     root = tk.Tk()
     root.title("Face Recognition")
-    root.overrideredirect(True)  # borderless fullscreen
+    root.overrideredirect(True)
     screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
     root.geometry(f"{screen_w}x{screen_h}+0+0")
 
-    # Canvas for video feed
     label = tk.Label(root, bg="black")
     label.pack(expand=True)
-
-    # Result label
     result_label = tk.Label(root, text="Looking for face...", font=("Arial", 18), fg="white", bg="black")
     result_label.pack(pady=10)
-
-    # Instruction label
     instruction_label = tk.Label(root, text="Press Q to close", font=("Arial", 14), fg="gray", bg="black")
     instruction_label.pack(pady=5)
 
@@ -116,8 +125,7 @@ def scan_once(images_base64: list[str] = None):
         if len(faces) > 0:
             (x, y, w, h) = faces[0]
             roi = gray[y:y + h, x:x + w]
-            id_, confidence = recognizer.predict(roi)
-            conf_score = round(100 - confidence)
+            id_, distance = recognizer.predict(roi)
 
             con = sqlite3.connect(DB_PATH)
             cur = con.cursor()
@@ -125,51 +133,43 @@ def scan_once(images_base64: list[str] = None):
             result = cur.fetchone()
             con.close()
 
-            if result and conf_score >= 85:
+            if result:
                 name, id_number = result
-                response = {
-                    "status": "ok",
-                    "person_id": id_,
-                    "name": name,
-                    "id_number": id_number,
-                    "confidence": conf_score,
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
-                result_text = f"{name} ({conf_score}%)"
-                color = "lime"
-                result_label.config(text=result_text, fg=color)
-                root.after(1500, root.destroy)
+                if distance < HIGH_CONF_DIST:
+                    response = {
+                        "status": "ok",
+                        "person_id": id_,
+                        "name": name,
+                        "id_number": id_number,
+                        "distance": distance,
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }
+                    result_label.config(text=f"{name} (High confidence)", fg="lime")
+                    root.after(1500, root.destroy)
+                elif distance < LOW_CONF_DIST:
+                    response = {
+                        "status": "low_confidence",
+                        "name": name,
+                        "id_number": id_number,
+                        "distance": distance,
+                        "message": "Recognition has lower confidence",
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }
+                    result_label.config(text=f"{name} (Low confidence)", fg="yellow")
+                else:
+                    response = {
+                        "status": "unknown",
+                        "message": "Unknown face",
+                        "distance": distance,
+                        "timestamp": datetime.datetime.now().isoformat()
+                    }
+                    result_label.config(text=f"Unknown", fg="red")
 
-            elif result:
-                response = {
-                    "status": "low_confidence",
-                    "name": result[0],
-                    "id_number": result[1],
-                    "confidence": conf_score,
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
-                result_text = f"Low confidence: {result[0]} ({conf_score}%)"
-                result_label.config(text=result_text, fg="yellow")
-
-            else:
-                response = {
-                    "status": "ok",
-                    "message": "Unknown face",
-                    "confidence": conf_score,
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
-                result_text = f"Unknown ({conf_score}%)"
-                result_label.config(text=result_text, fg="red")
-
-        # Convert frame for Tkinter
         img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(img)
-        img = img.resize((640, 480))
+        img = Image.fromarray(img).resize((640, 480))
         imgtk = ImageTk.PhotoImage(image=img)
-
         label.imgtk = imgtk
         label.configure(image=imgtk)
-
         root.after(10, update_frame)
 
     def on_key(event):
@@ -177,10 +177,8 @@ def scan_once(images_base64: list[str] = None):
             root.destroy()
 
     root.bind("<Key>", on_key)
-
     update_frame()
     root.mainloop()
-
     cap.release()
     cv2.destroyAllWindows()
     return response
