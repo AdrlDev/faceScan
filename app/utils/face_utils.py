@@ -1,5 +1,6 @@
 # face_utils.py
 import cv2, os, sqlite3, datetime, numpy as np
+from scan import LOW_CONF_DIST
 
 # Base directory = app/utils/
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -121,7 +122,7 @@ def is_user_enrolled(id_number: str) -> bool:
     conn.close()
     return exists
 
-def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: float = 70.0):
+def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: float = LOW_CONF_DIST):
     """
     Check if a new face matches any existing enrolled faces.
     Returns (True, id_number, confidence) if match found, else (False, None, None).
@@ -135,17 +136,23 @@ def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: floa
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    for face in new_face_samples:
+    for frame in new_face_samples:
         try:
-            person_id, confidence = recognizer.predict(face)
+            faces = face_detector.detectMultiScale(frame, 1.3, 5)
+            for (x, y, w, h) in faces:
+                roi = frame[y:y+h, x:x+w]
+                person_id, distance = recognizer.predict(roi)
 
-            if confidence < threshold:
-                # check if person_id actually exists
-                cursor.execute("SELECT id_number FROM people WHERE id = ?", (person_id,))
-                row = cursor.fetchone()
-                if row:
-                    return True, row[0], confidence  # ✅ real enrolled face found
-        except Exception:
+                print(f"[DEBUG] Predicted id={person_id}, distance={distance}")
+
+                if distance < threshold:
+                    cursor.execute("SELECT id_number FROM people WHERE id = ?", (person_id,))
+                    row = cursor.fetchone()
+                    if row:
+                        conn.close()
+                        return True, row[0], distance  # ✅ real enrolled face found
+        except Exception as e:
+            print(f"[ERROR] Prediction failed: {e}")
             continue
 
     conn.close()
@@ -172,50 +179,47 @@ def clear_all_faces():
 
     return {"success": True, "message": "All faces, dataset images, and database entries cleared"}
 
-def delete_face_by_scan(new_face_samples: list[np.ndarray], id_number: str, threshold: float = 90):
+def delete_face_by_scan(new_face_samples: list[np.ndarray], id_number: str, threshold: float = LOW_CONF_DIST):
     """
-    Deletes a face strictly:
-    - Only if dataset images and DB record exist.
-    - Uses threshold distance for safe deletion.
+    Deletes a face only if:
+    - A matching enrolled face is found
+    - The id_number matches the DB record
     """
-    if not os.path.exists(TRAINER_FILE):
-        return False, "No trained faces available."
+    # First, verify that this face is enrolled
+    match, matched_id_number, distance = is_face_already_enrolled(new_face_samples, threshold)
 
-    recognizer.read(TRAINER_FILE)
+    if not match:
+        return False, "No matching face found."
 
-    for face in new_face_samples:
-        try:
-            person_id, distance = recognizer.predict(face)
-            if distance < threshold:
-                conn = sqlite3.connect(DB_PATH)
-                cursor = conn.cursor()
-                cursor.execute("SELECT name, id_number FROM people WHERE id=? AND id_number=?", (person_id,id_number,))
-                row = cursor.fetchone()
-                if not row:
-                    conn.close()
-                    return False, f"No database record found for person_id {person_id}"
+    if matched_id_number != id_number:
+        return False, f"Face found but ID number mismatch. Expected {id_number}, got {matched_id_number}"
 
-                name, id_number = row
+    # At this point, we have a valid enrolled face → delete from DB and dataset
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, name FROM people WHERE id_number=?", (id_number,))
+    row = cursor.fetchone()
 
-                deleted_count = 0
-                for file in os.listdir(DATASET_DIR):
-                    if file.startswith(f"user.{person_id}."):
-                        os.remove(os.path.join(DATASET_DIR, file))
-                        deleted_count += 1
+    if not row:
+        conn.close()
+        return False, f"No database record found for {id_number}"
 
-                if deleted_count == 0:
-                    conn.close()
-                    return False, f"No dataset images found for {name} ({id_number})"
+    person_id, name = row
 
-                cursor.execute("DELETE FROM people WHERE id=?", (person_id,))
-                conn.commit()
-                conn.close()
+    # Delete dataset images
+    deleted_count = 0
+    for file in os.listdir(DATASET_DIR):
+        if file.startswith(f"user.{person_id}."):
+            os.remove(os.path.join(DATASET_DIR, file))
+            deleted_count += 1
 
-                train_model()
-                return True, f"Deleted {name} ({id_number}) with {deleted_count} image(s)."
+    # Delete DB record
+    cursor.execute("DELETE FROM people WHERE id=?", (person_id,))
+    conn.commit()
+    conn.close()
 
-        except Exception:
-            continue
+    # Retrain after deletion
+    train_model()
 
-    return False, "No matching face found."
+    return True, f"Deleted {name} ({id_number}) with {deleted_count} image(s)."
 
