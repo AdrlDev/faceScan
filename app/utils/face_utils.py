@@ -1,6 +1,5 @@
 # face_utils.py
-import cv2, os, sqlite3, datetime, numpy as np
-from .scan import LOW_CONF_DIST
+import cv2, os, sqlite3, numpy as np
 
 # Base directory = app/utils/
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -122,7 +121,7 @@ def is_user_enrolled(id_number: str) -> bool:
     conn.close()
     return exists
 
-def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: float = LOW_CONF_DIST):
+def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: float = 50):
     """
     Check if a new face matches any existing enrolled faces.
     Returns (True, id_number, confidence) if match found, else (False, None, None).
@@ -179,7 +178,7 @@ def clear_all_faces():
 
     return {"success": True, "message": "All faces, dataset images, and database entries cleared"}
 
-def delete_face_by_scan(new_face_samples: list[np.ndarray], id_number: str, threshold: float = LOW_CONF_DIST):
+def delete_face_by_scan(new_face_samples: list[np.ndarray], id_number: str, threshold: float = 50):
     """
     Deletes a face only if:
     - A matching enrolled face is found
