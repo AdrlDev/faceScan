@@ -135,6 +135,38 @@ def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: floa
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
+    for roi in new_face_samples:  # these are already cropped faces
+        try:
+            person_id, distance = recognizer.predict(roi)
+            print(f"[DEBUG] Predicted id={person_id}, distance={distance}")
+
+            if distance < threshold:
+                cursor.execute("SELECT id_number FROM people WHERE id = ?", (person_id,))
+                row = cursor.fetchone()
+                if row:
+                    conn.close()
+                    return True, row[0], distance  # ✅ already enrolled
+        except Exception as e:
+            print(f"[ERROR] Prediction failed: {e}")
+            continue
+
+    conn.close()
+    return False, None, None  # ✅ new face
+
+def is_face_already_enrolled_to_delete(new_face_samples: list[np.ndarray], threshold: float = 50):
+    """
+    Check if a new face matches any existing enrolled faces.
+    Returns (True, id_number, confidence) if match found, else (False, None, None).
+    """
+    if not os.path.exists(TRAINER_FILE):
+        return False, None, None  # no training data yet
+
+    recognizer = cv2.face.LBPHFaceRecognizer_create()
+    recognizer.read(TRAINER_FILE)
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
     for frame in new_face_samples:
         try:
             faces = face_detector.detectMultiScale(frame, 1.3, 5)
@@ -185,7 +217,7 @@ def delete_face_by_scan(new_face_samples: list[np.ndarray], id_number: str, thre
     - The id_number matches the DB record
     """
     # First, verify that this face is enrolled
-    match, matched_id_number, distance = is_face_already_enrolled(new_face_samples, threshold)
+    match, matched_id_number, distance = is_face_already_enrolled_to_delete(new_face_samples, threshold)
 
     if not match:
         return False, "No matching face found."
