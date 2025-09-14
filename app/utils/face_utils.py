@@ -1,6 +1,6 @@
 # face_utils.py
 import cv2, os, sqlite3, datetime, numpy as np
-from scan import LOW_CONF_DIST
+from .scan import LOW_CONF_DIST
 
 # Base directory = app/utils/
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
