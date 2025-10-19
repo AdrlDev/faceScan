@@ -31,10 +31,16 @@ def load_known_faces():
             known_faces[person_id] = {"name": name, "id_number": id_number, "encodings": []}
 
         img_path = os.path.join(DATASET_DIR, filename)
-        img = face_recognition.load_image_file(img_path)
-        encs = face_recognition.face_encodings(img)
-        if encs:
+        try:
+            img = face_recognition.load_image_file(img_path)
+            encs = face_recognition.face_encodings(img)
+            if not encs:
+                print(f"[WARN] No face found in {filename}, skipping.")
+                continue
             known_faces[person_id]["encodings"].append(encs[0])
+        except Exception as e:
+            print(f"[ERROR] Failed to process {filename}: {e}")
+            continue
 
     conn.close()
     print("[DEBUG] Loaded known faces:", len(known_faces))
