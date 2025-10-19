@@ -3,7 +3,7 @@ import sqlite3
 import cv2
 import numpy as np
 import base64
-from .face_utils import face_detector, DB_PATH, TRAINER_FILE, init_db
+from .face_utils import face_detector, DB_PATH, TRAINER_FILE, DATASET_DIR, init_db
 
 init_db()
 
@@ -17,7 +17,7 @@ def enroll_face(name: str, id_number: str, images_base64: list[str]):
     if not images_base64 or len(images_base64) == 0:
         return {"success": False, "message": "No images provided"}
 
-    dataset_dir = os.path.join(os.path.dirname(TRAINER_FILE), "dataset")
+    dataset_dir = os.path.join(os.path.dirname(DATASET_DIR), "dataset")
     os.makedirs(dataset_dir, exist_ok=True)
     print("[DEBUG] Dataset folder:", dataset_dir)
     print("[DEBUG] TRAINER_FILE path:", TRAINER_FILE)
