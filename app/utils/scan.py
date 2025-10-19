@@ -11,11 +11,11 @@ from .face_utils import face_detector, recognizer, DB_PATH, TRAINER_FILE, init_d
 init_db()
 
 # Distance thresholds (LBPH: lower distance = higher confidence)
-HIGH_CONF_DIST = 50      # very confident
-LOW_CONF_DIST = 90       # somewhat confident
-MAX_DIST = 120           # above this = unknown
+HIGH_CONF_DIST = 45
+LOW_CONF_DIST = 70
+MAX_DIST = 100
 
-def scan_once(images_base64: list[str] = None):
+def scan_once(images_base64: list[str] = None): # type: ignore
     """
     Perform face recognition:
     - images_base64 → API/Render mode
@@ -54,22 +54,39 @@ def scan_once(images_base64: list[str] = None):
         if result:
             name, id_number = result
             status = classify_face(distance)
+
             if status == "ok":
                 message = f"Recognized {name} with high confidence"
+                return {
+                    "status": status,
+                    "person_id": person_id,
+                    "name": name,
+                    "id_number": id_number,
+                    "distance": distance,
+                    "message": message,
+                    "timestamp": datetime.datetime.now().isoformat()
+                }
+
             elif status == "low_confidence":
                 message = f"Recognized {name} with lower confidence"
-            else:
-                message = "Unknown face"
+                return {
+                    "status": status,
+                    "person_id": person_id,
+                    "name": name,
+                    "id_number": id_number,
+                    "distance": distance,
+                    "message": message,
+                    "timestamp": datetime.datetime.now().isoformat()
+                }
 
-            return {
-                "status": status,
-                "person_id": person_id,
-                "name": name,
-                "id_number": id_number,
-                "distance": distance,
-                "message": message,
-                "timestamp": datetime.datetime.now().isoformat()
-            }
+            else:
+                # distance too high = unreliable
+                return {
+                    "status": "unknown",
+                    "distance": distance,
+                    "message": "Unknown face",
+                    "timestamp": datetime.datetime.now().isoformat()
+                }
         else:
             return {
                 "status": "unknown",

@@ -7,7 +7,7 @@ import numpy as np
 
 init_db()
 
-def enroll_face(name: str, id_number: str, images_base64: list[str] = None):
+def enroll_face(name: str, id_number: str, images_base64: list[str] = None): # type: ignore
     init_db()
 
     if is_user_enrolled(id_number):

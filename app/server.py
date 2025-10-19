@@ -37,7 +37,7 @@ async def api_enroll(req: EnrollRequest):
     Enroll a user by capturing their face through server webcam.
     """
     start_enrollment()
-    result = enroll_face(req.name, req.id_number, req.images_base64)
+    result = enroll_face(req.name, req.id_number, req.images_base64) # type: ignore
     return result
 
 @app.post("/api/scan")
@@ -49,7 +49,7 @@ async def api_scan(req: ScanRequest):
     """
     start_scan()
     images = req.images_base64
-    result = scan_once(images)
+    result = scan_once(images) # type: ignore
     return result
 
 @app.post("/api/cancel-scan")

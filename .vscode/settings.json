@@ -1,0 +1,32 @@
+{
+    "python.terminal.activateEnvironment": true,
+
+    // 🌐 --- Uvicorn auto-run optional (for tasks.json) ---
+    "terminal.integrated.env.linux": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.diagnosticSeverityOverrides": {
+        // Ignore OpenCV false positives
+        "reportAttributeAccessIssue": "none",
+        "reportMissingImports": "none",
+        "reportMissingModuleSource": "none",
+
+        // 👇 Ignore Optional/None assignment type warnings
+        "reportOptionalMemberAccess": "none",
+        "reportOptionalSubscript": "none",
+        "reportOptionalIterable": "none",
+        "reportOptionalCall": "none",
+        "reportOptionalOperand": "none",
+        "reportOptionalContextManager": "none",
+        "reportGeneralTypeIssues": "none"
+    },
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.analysis.autoImportCompletions": true,
+    "python.analysis.useLibraryCodeForTypes": true,
+    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter"
+    }
+}
