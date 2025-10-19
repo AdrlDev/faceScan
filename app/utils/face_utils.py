@@ -5,8 +5,8 @@ import cv2, os, sqlite3, numpy as np
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 
 DB_PATH = os.path.join(BASE_DIR, "data", "faces.db")
-DATASET_DIR = os.path.join(BASE_DIR, "data", "dataset")
 CONFIG_DIR = os.path.join(BASE_DIR, "config")   # ✅ Add this
+DATASET_DIR = os.path.join(CONFIG_DIR, "dataset")
 os.makedirs(CONFIG_DIR, exist_ok=True)          # ✅ Ensure config folder exists
 
 TRAINER_FILE = os.path.join(CONFIG_DIR, "trainer.yml")
