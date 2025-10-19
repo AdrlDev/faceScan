@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 from app.utils.enroll import enroll_face
 from app.utils.scan import scan_once
-from app.utils.face_utils import clear_all_faces, delete_face_by_scan, cancel_enrollment, start_enrollment, cancel_scan, start_scan
+from app.utils.face_utils import clear_all_faces, delete_face_by_id, cancel_enrollment, start_enrollment, cancel_scan, start_scan
 
 app = FastAPI()
 
@@ -89,7 +89,7 @@ async def delete_face_api(req: ScanDeleteRequest):
         return {"success": False, "message": "No valid images could be decoded."}
 
     try:
-        success, message = delete_face_by_scan(gray_faces, req.id_number)
+        success, message = delete_face_by_id(req.id_number)
         return {"success": success, "message": message}
     except Exception as e:
         return {"success": False, "message": f"Error during deletion: {e}"}
