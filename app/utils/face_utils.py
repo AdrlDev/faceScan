@@ -9,11 +9,11 @@ import datetime
 # Directories
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
-DATA_DIR = os.path.join(BASE_DIR, "data")
 DATASET_DIR = os.path.join(CONFIG_DIR, "dataset")
 os.makedirs(DATASET_DIR, exist_ok=True)
 
-DB_PATH = os.path.join(DATA_DIR, "faces.db")
+DB_PATH = os.path.join(BASE_DIR, "data", "faces.db")
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 # Global flags
 enrollment_active = True
