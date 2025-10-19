@@ -4,8 +4,6 @@ import datetime
 import os
 import base64
 import numpy as np
-import tkinter as tk
-from PIL import Image, ImageTk  # type: ignore
 from .face_utils import face_detector, recognizer, DB_PATH, TRAINER_FILE, init_db, is_scanning_active
 
 init_db()
@@ -15,11 +13,9 @@ HIGH_CONF_DIST = 45
 LOW_CONF_DIST = 70
 MAX_DIST = 100
 
-def scan_once(images_base64: list[str] = None): # type: ignore
+def scan_once(images_base64: list[str]):
     """
-    Perform face recognition:
-    - images_base64 → API/Render mode
-    - None → fallback to webcam + Tkinter
+    Perform face recognition in API/Render mode only (base64 images).
     Returns structured result with confidence level.
     """
     if not os.path.exists(TRAINER_FILE):
@@ -54,39 +50,23 @@ def scan_once(images_base64: list[str] = None): # type: ignore
         if result:
             name, id_number = result
             status = classify_face(distance)
+            message = (
+                f"Recognized {name} with high confidence"
+                if status == "ok"
+                else f"Recognized {name} with lower confidence"
+                if status == "low_confidence"
+                else "Unknown face"
+            )
 
-            if status == "ok":
-                message = f"Recognized {name} with high confidence"
-                return {
-                    "status": status,
-                    "person_id": person_id,
-                    "name": name,
-                    "id_number": id_number,
-                    "distance": distance,
-                    "message": message,
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
-
-            elif status == "low_confidence":
-                message = f"Recognized {name} with lower confidence"
-                return {
-                    "status": status,
-                    "person_id": person_id,
-                    "name": name,
-                    "id_number": id_number,
-                    "distance": distance,
-                    "message": message,
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
-
-            else:
-                # distance too high = unreliable
-                return {
-                    "status": "unknown",
-                    "distance": distance,
-                    "message": "Unknown face",
-                    "timestamp": datetime.datetime.now().isoformat()
-                }
+            return {
+                "status": status,
+                "person_id": person_id if status != "unknown" else None,
+                "name": name if status != "unknown" else None,
+                "id_number": id_number if status != "unknown" else None,
+                "distance": distance,
+                "message": message,
+                "timestamp": datetime.datetime.now().isoformat()
+            }
         else:
             return {
                 "status": "unknown",
@@ -96,78 +76,21 @@ def scan_once(images_base64: list[str] = None): # type: ignore
             }
 
     # --- Cloud/API mode ---
-    if images_base64:
-        response = {"status": "unknown", "message": "No face detected"}
-        for img_b64 in images_base64:
-            if not is_scanning_active():
-                return {"status": "canceled", "message": "Scan canceled by user"}
+    if not images_base64:
+        return {"status": "error", "message": "No images provided for scanning."}
 
-            try:
-                img_data = base64.b64decode(img_b64)
-                np_arr = np.frombuffer(img_data, np.uint8)
-                frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-                result = process_frame(frame)
-                if result:
-                    return result
-            except Exception as e:
-                response = {"status": "error", "message": str(e)}
-        return response
-
-    # --- Local webcam mode ---
-    cap = cv2.VideoCapture(0)
     response = {"status": "unknown", "message": "No face detected"}
-
-    root = tk.Tk()
-    root.title("Face Recognition")
-    root.overrideredirect(True)
-    screen_w, screen_h = root.winfo_screenwidth(), root.winfo_screenheight()
-    root.geometry(f"{screen_w}x{screen_h}+0+0")
-
-    label = tk.Label(root, bg="black")
-    label.pack(expand=True)
-    result_label = tk.Label(root, text="Looking for face...", font=("Arial", 18), fg="white", bg="black")
-    result_label.pack(pady=10)
-    instruction_label = tk.Label(root, text="Press Q to close", font=("Arial", 14), fg="gray", bg="black")
-    instruction_label.pack(pady=5)
-
-    def update_frame():
-        nonlocal response
+    for img_b64 in images_base64:
         if not is_scanning_active():
-            root.destroy()
-            response = {"status": "canceled", "message": "Scan canceled by user"}
-            return
+            return {"status": "canceled", "message": "Scan canceled by user"}
 
-        ret, frame = cap.read()
-        if not ret:
-            root.after(10, update_frame)
-            return
-
-        result = process_frame(frame)
-        if result:
-            response = result
-            # Update Tkinter label colors
-            if response["status"] == "high_confidence":
-                result_label.config(text=response["message"], fg="lime")
-                root.after(1500, root.destroy)
-            elif response["status"] == "low_confidence":
-                result_label.config(text=response["message"], fg="yellow")
-            else:
-                result_label.config(text=response["message"], fg="red")
-
-        img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(img).resize((640, 480))
-        imgtk = ImageTk.PhotoImage(image=img)
-        label.imgtk = imgtk
-        label.configure(image=imgtk)
-        root.after(10, update_frame)
-
-    def on_key(event):
-        if event.keysym.lower() == "q":
-            root.destroy()
-
-    root.bind("<Key>", on_key)
-    update_frame()
-    root.mainloop()
-    cap.release()
-    cv2.destroyAllWindows()
+        try:
+            img_data = base64.b64decode(img_b64)
+            np_arr = np.frombuffer(img_data, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+            result = process_frame(frame)
+            if result:
+                return result
+        except Exception as e:
+            response = {"status": "error", "message": str(e)}
     return response
