@@ -1,58 +1,55 @@
 # face_utils.py
-import cv2, os, sqlite3, numpy as np
+import os
+import cv2
+import sqlite3
+import numpy as np
+import face_recognition
+import datetime
 
-# Base directory = app/utils/
+# Directories
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
-
-DB_PATH = os.path.join(BASE_DIR, "data", "faces.db")
-CONFIG_DIR = os.path.join(BASE_DIR, "config")   # ✅ Add this
+CONFIG_DIR = os.path.join(BASE_DIR, "config")
+DATA_DIR = os.path.join(BASE_DIR, "data")
 DATASET_DIR = os.path.join(CONFIG_DIR, "dataset")
-os.makedirs(CONFIG_DIR, exist_ok=True)          # ✅ Ensure config folder exists
-
-TRAINER_FILE = os.path.join(CONFIG_DIR, "trainer.yml")
-CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-
 os.makedirs(DATASET_DIR, exist_ok=True)
-face_detector = cv2.CascadeClassifier(CASCADE_PATH)
-recognizer = cv2.face.LBPHFaceRecognizer_create()
 
-# global flag to control enrollment
+DB_PATH = os.path.join(DATA_DIR, "faces.db")
+
+# Global flags
 enrollment_active = True
 scanning_active = True
 
+
+# ------------------- Session control ------------------- #
 def start_scan():
-    """Mark scan session as active."""
     global scanning_active
     scanning_active = True
 
 def cancel_scan():
-    """Cancel current scan process."""
     global scanning_active
     scanning_active = False
     return {"success": True, "message": "Scan process canceled."}
 
 def is_scanning_active():
-    """Check if scan is still active."""
     return scanning_active
 
 def start_enrollment():
-    """Mark enrollment session as active."""
     global enrollment_active
     enrollment_active = True
 
 def cancel_enrollment():
-    """Cancel current enrollment process."""
     global enrollment_active
     enrollment_active = False
     return {"success": True, "message": "Enrollment process canceled."}
 
 def is_enrollment_active():
-    """Check if enrollment is still active."""
     return enrollment_active
 
+
+# ------------------- Database ------------------- #
 def init_db():
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
     cur.execute("""CREATE TABLE IF NOT EXISTS people (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -67,190 +64,141 @@ def init_db():
         purpose TEXT,
         timestamp TEXT
     )""")
-    con.commit()
-    con.close()
-
-def enroll(name, id_number, gray_faces, person_id=None):
-    """
-    Save detected faces (grayscale ROIs) for a person and retrain the model.
-    """
-    global enrollment_active
-    if not enrollment_active:
-        return False, "Enrollment was canceled."
-
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
-
-    # If no person_id given, insert into people
-    if person_id is None:
-        cur.execute("INSERT INTO people (name, id_number) VALUES (?, ?)", (name, id_number))
-        person_id = cur.lastrowid
-    con.commit()
-    con.close()
-
-    count = 0
-    for roi in gray_faces:
-        if not enrollment_active:  # 👈 stop mid-process if canceled
-            return False, "Enrollment was canceled during process."
-
-        path = os.path.join(DATASET_DIR, f"user.{person_id}.{count}.jpg")
-        cv2.imwrite(path, roi)
-        count += 1
-
-    train_model()
-    return True, f"Enrolled {name} with {count} sample(s)."
-
-def train_model():
-    paths = [os.path.join(DATASET_DIR, f) for f in os.listdir(DATASET_DIR)]
-    face_samples, ids = [], []
-    for path in paths:
-        gray = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
-        person_id = int(path.split(".")[1])
-        face_samples.append(gray)
-        ids.append(person_id)
-    if face_samples:
-        recognizer.train(face_samples, np.array(ids))
-        recognizer.save(TRAINER_FILE)
-
-def is_user_enrolled(id_number: str) -> bool:
-    """Check if user with given ID is already in the database."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM people WHERE id_number = ?", (id_number,))
-    exists = cursor.fetchone()[0] > 0
-    conn.close()
-    return exists
-
-def is_face_already_enrolled(new_face_samples: list[np.ndarray], threshold: float = 50):
-    """
-    Check if a new face matches any existing enrolled faces.
-    Returns (True, id_number, confidence) if match found, else (False, None, None).
-    """
-    if not os.path.exists(TRAINER_FILE):
-        return False, None, None  # no training data yet
-
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    recognizer.read(TRAINER_FILE)
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    for roi in new_face_samples:  # these are already cropped faces
-        try:
-            person_id, distance = recognizer.predict(roi)
-            print(f"[DEBUG] Predicted id={person_id}, distance={distance}")
-
-            if distance < threshold:
-                cursor.execute("SELECT id_number FROM people WHERE id = ?", (person_id,))
-                row = cursor.fetchone()
-                if row:
-                    conn.close()
-                    return True, row[0], distance  # ✅ already enrolled
-        except Exception as e:
-            print(f"[ERROR] Prediction failed: {e}")
-            continue
-
-    conn.close()
-    return False, None, None  # ✅ new face
-
-def is_face_already_enrolled_to_delete(new_face_samples: list[np.ndarray], threshold: float = 50):
-    """
-    Check if a new face matches any existing enrolled faces.
-    Returns (True, id_number, confidence) if match found, else (False, None, None).
-    """
-    if not os.path.exists(TRAINER_FILE):
-        return False, None, None  # no training data yet
-
-    recognizer = cv2.face.LBPHFaceRecognizer_create()
-    recognizer.read(TRAINER_FILE)
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    for frame in new_face_samples:
-        try:
-            faces = face_detector.detectMultiScale(frame, 1.3, 5)
-            for (x, y, w, h) in faces:
-                roi = frame[y:y+h, x:x+w]
-                person_id, distance = recognizer.predict(roi)
-
-                print(f"[DEBUG] Predicted id={person_id}, distance={distance}")
-
-                if distance < threshold:
-                    cursor.execute("SELECT id_number FROM people WHERE id = ?", (person_id,))
-                    row = cursor.fetchone()
-                    if row:
-                        conn.close()
-                        return True, row[0], distance  # ✅ real enrolled face found
-        except Exception as e:
-            print(f"[ERROR] Prediction failed: {e}")
-            continue
-
-    conn.close()
-    return False, None, None  # ✅ new face
-
-def clear_all_faces():
-    # ✅ Clear database
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM people")  # remove all enrolled users
     conn.commit()
     conn.close()
 
-    # ✅ Delete trainer file
-    if os.path.exists(TRAINER_FILE):
-        os.remove(TRAINER_FILE)
 
-    # ✅ Clear dataset directory
-    if os.path.exists(DATASET_DIR):
-        for file in os.listdir(DATASET_DIR):
-            file_path = os.path.join(DATASET_DIR, file)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-
-    return {"success": True, "message": "All faces, dataset images, and database entries cleared"}
-
-def delete_face_by_scan(new_face_samples: list[np.ndarray], id_number: str, threshold: float = 50):
-    """
-    Deletes a face only if:
-    - A matching enrolled face is found
-    - The id_number matches the DB record
-    """
-    # First, verify that this face is enrolled
-    match, matched_id_number, distance = is_face_already_enrolled_to_delete(new_face_samples, threshold)
-
-    if not match:
-        return False, "No matching face found."
-
-    if matched_id_number != id_number:
-        return False, f"Face found but ID number mismatch. Expected {id_number}, got {matched_id_number}"
-
-    # At this point, we have a valid enrolled face → delete from DB and dataset
+def is_user_enrolled(id_number: str) -> bool:
     conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name FROM people WHERE id_number=?", (id_number,))
-    row = cursor.fetchone()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM people WHERE id_number=?", (id_number,))
+    exists = cur.fetchone()[0] > 0
+    conn.close()
+    return exists
 
+
+# ------------------- Enrollment ------------------- #
+def enroll(name: str, id_number: str, rgb_faces: list[np.ndarray]):
+    """
+    Enroll faces using face_recognition.
+    rgb_faces: list of RGB images (numpy arrays) of faces
+    """
+    global enrollment_active
+    if not enrollment_active:
+        return False, "Enrollment canceled."
+
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+
+    # Insert into DB if not exists
+    if not is_user_enrolled(id_number):
+        cur.execute("INSERT INTO people (name, id_number) VALUES (?, ?)", (name, id_number))
+        person_id = cur.lastrowid
+        conn.commit()
+    else:
+        cur.execute("SELECT id FROM people WHERE id_number=?", (id_number,))
+        person_id = cur.fetchone()[0]
+
+    # Save face images in dataset
+    count = 0
+    for img in rgb_faces:
+        if not enrollment_active:
+            return False, "Enrollment canceled mid-process."
+        path = os.path.join(DATASET_DIR, f"user.{id_number}.{count}.jpg")
+        rgb_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(path, rgb_bgr)
+        count += 1
+
+    conn.close()
+    return True, f"Enrolled {name} with {count} sample(s)."
+
+
+# ------------------- Face Checking ------------------- #
+def is_face_already_enrolled(new_faces: list[np.ndarray], dist_threshold: float = 0.6):
+    """
+    Check if a face is already enrolled using face_recognition.
+    Returns (True, id_number, distance) if match found
+    """
+    known_faces = {}
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    for filename in os.listdir(DATASET_DIR):
+        if not filename.lower().endswith(".jpg"):
+            continue
+        parts = filename.split(".")
+        if len(parts) < 3:
+            continue
+        id_number = parts[1]
+        if id_number not in known_faces:
+            cur.execute("SELECT name, id_number FROM people WHERE id_number=?", (id_number,))
+            row = cur.fetchone()
+            if not row:
+                continue
+            name, id_num = row
+            known_faces[id_number] = {"name": name, "encodings": []}
+
+        img_path = os.path.join(DATASET_DIR, filename)
+        img = face_recognition.load_image_file(img_path)
+        encs = face_recognition.face_encodings(img)
+        if encs:
+            known_faces[id_number]["encodings"].append(encs[0])
+    conn.close()
+
+    # Compare new faces to known faces
+    for face_img in new_faces:
+        encs = face_recognition.face_encodings(face_img)
+        if not encs:
+            continue
+        face_encoding = encs[0]
+
+        for id_number, info in known_faces.items():
+            if not info["encodings"]:
+                continue
+            distances = face_recognition.face_distance(info["encodings"], face_encoding)
+            min_dist = np.min(distances)
+            if min_dist <= dist_threshold:
+                return True, id_number, min_dist
+    return False, None, None
+
+
+# ------------------- Deletion ------------------- #
+def delete_face_by_id(id_number: str):
+    """
+    Deletes all faces and DB entry for a given id_number
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT id, name FROM people WHERE id_number=?", (id_number,))
+    row = cur.fetchone()
     if not row:
         conn.close()
-        return False, f"No database record found for {id_number}"
-
+        return False, "ID not found in database."
     person_id, name = row
 
     # Delete dataset images
     deleted_count = 0
     for file in os.listdir(DATASET_DIR):
-        if file.startswith(f"user.{person_id}."):
+        if file.startswith(f"user.{id_number}."):
             os.remove(os.path.join(DATASET_DIR, file))
             deleted_count += 1
 
     # Delete DB record
-    cursor.execute("DELETE FROM people WHERE id=?", (person_id,))
+    cur.execute("DELETE FROM people WHERE id_number=?", (id_number,))
     conn.commit()
     conn.close()
 
-    # Retrain after deletion
-    train_model()
+    return True, f"Deleted {name} ({id_number}) with {deleted_count} images."
 
-    return True, f"Deleted {name} ({id_number}) with {deleted_count} image(s)."
 
+# ------------------- Clear All ------------------- #
+def clear_all_faces():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM people")
+    conn.commit()
+    conn.close()
+
+    for file in os.listdir(DATASET_DIR):
+        os.remove(os.path.join(DATASET_DIR, file))
+
+    return {"success": True, "message": "All faces, dataset images, and database entries cleared."}

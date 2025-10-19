@@ -1,3 +1,4 @@
+# scan.py
 import os
 import base64
 import cv2
@@ -10,6 +11,11 @@ from .face_utils import DATASET_DIR, DB_PATH
 DIST_THRESHOLD = 0.6
 
 def load_known_faces():
+    """
+    Load known faces from DATASET_DIR.
+    Supports int or string IDs from filename: user.<id>.<num>.jpg
+    Returns dict {person_id: {"name": str, "id_number": str, "encodings": [np.array]}}
+    """
     known_faces = {}
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -17,24 +23,15 @@ def load_known_faces():
     for filename in os.listdir(DATASET_DIR):
         if not filename.lower().endswith(".jpg"):
             continue
-
         parts = filename.split(".")
         if len(parts) < 3:
-            print(f"[WARN] Skipping invalid filename: {filename}")
             continue
-
-        person_id = parts[1]  # keep as string, works for both numeric and non-numeric
-
+        person_id = parts[1]  # keep as string
+        # Fetch DB info if not already loaded
         if person_id not in known_faces:
-            # Try to fetch person info using id (convert if numeric)
-            try:
-                cur.execute("SELECT name, id_number FROM people WHERE id=?", (int(person_id),))
-            except ValueError:
-                # fallback: use id_number as string
-                cur.execute("SELECT name, id_number FROM people WHERE id_number=?", (person_id,))
+            cur.execute("SELECT name, id_number FROM people WHERE id_number=?", (person_id,))
             row = cur.fetchone()
             if not row:
-                print(f"[WARN] No DB entry for person_id: {person_id}")
                 continue
             name, id_number = row
             known_faces[person_id] = {"name": name, "id_number": id_number, "encodings": []}
@@ -49,7 +46,12 @@ def load_known_faces():
     print("[DEBUG] Loaded known faces:", len(known_faces))
     return known_faces
 
+
 def scan_once(images_base64: list[str]):
+    """
+    Perform face recognition on base64 images.
+    Returns first matched face or "unknown".
+    """
     if not images_base64:
         return {"status": "error", "message": "No images provided"}
 
@@ -71,9 +73,9 @@ def scan_once(images_base64: list[str]):
                 best_match_id = None
                 best_distance = 1.0
                 for person_id, info in known_faces.items():
-                    distances = face_recognition.face_distance(info["encodings"], face_encoding)
-                    if len(distances) == 0:
+                    if not info["encodings"]:
                         continue
+                    distances = face_recognition.face_distance(info["encodings"], face_encoding)
                     min_dist = np.min(distances)
                     if min_dist < best_distance:
                         best_distance = min_dist
