@@ -4,9 +4,14 @@ import cv2
 import sqlite3
 import numpy as np
 import face_recognition
+import logging
 import datetime
 
-# Directories
+# ------------------- Logging ------------------- #
+logging.basicConfig(level=logging.INFO, handlers=[logging.StreamHandler()])
+logger = logging.getLogger(__name__)
+
+# ------------------- Directories ------------------- #
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 CONFIG_DIR = os.path.join(BASE_DIR, "config")
 DATASET_DIR = os.path.join(CONFIG_DIR, "dataset")
@@ -15,12 +20,11 @@ os.makedirs(DATASET_DIR, exist_ok=True)
 DB_PATH = os.path.join(BASE_DIR, "data", "faces.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
-# Global flags
+# ------------------- Global Flags ------------------- #
 enrollment_active = True
 scanning_active = True
 
-
-# ------------------- Session control ------------------- #
+# ------------------- Session Control ------------------- #
 def start_scan():
     global scanning_active
     scanning_active = True
@@ -45,28 +49,34 @@ def cancel_enrollment():
 def is_enrollment_active():
     return enrollment_active
 
-
 # ------------------- Database ------------------- #
 def init_db():
+    """Create tables if not exist"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("""CREATE TABLE IF NOT EXISTS people (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        id_number TEXT NOT NULL
-    )""")
-    cur.execute("""CREATE TABLE IF NOT EXISTS logs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person_id INTEGER,
-        name TEXT,
-        id_number TEXT,
-        action TEXT,
-        purpose TEXT,
-        timestamp TEXT
-    )""")
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS people (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            id_number TEXT NOT NULL UNIQUE
+        )
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            person_id INTEGER,
+            name TEXT,
+            id_number TEXT,
+            action TEXT,
+            purpose TEXT,
+            timestamp TEXT
+        )
+    """)
     conn.commit()
     conn.close()
 
+# Ensure DB exists on import
+init_db()
 
 def is_user_enrolled(id_number: str) -> bool:
     conn = sqlite3.connect(DB_PATH)
@@ -75,7 +85,6 @@ def is_user_enrolled(id_number: str) -> bool:
     exists = cur.fetchone()[0] > 0
     conn.close()
     return exists
-
 
 # ------------------- Enrollment ------------------- #
 def enroll(name: str, id_number: str, rgb_faces: list[np.ndarray]):
@@ -90,16 +99,13 @@ def enroll(name: str, id_number: str, rgb_faces: list[np.ndarray]):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    # Insert into DB if not exists
     if not is_user_enrolled(id_number):
         cur.execute("INSERT INTO people (name, id_number) VALUES (?, ?)", (name, id_number))
-        person_id = cur.lastrowid
         conn.commit()
     else:
-        cur.execute("SELECT id FROM people WHERE id_number=?", (id_number,))
-        person_id = cur.fetchone()[0]
+        logger.info(f"User {id_number} already enrolled")
 
-    # Save face images in dataset
+    # Save face images
     count = 0
     for img in rgb_faces:
         if not enrollment_active:
@@ -110,18 +116,27 @@ def enroll(name: str, id_number: str, rgb_faces: list[np.ndarray]):
         count += 1
 
     conn.close()
+    logger.info(f"Enrolled {name} with {count} sample(s).")
     return True, f"Enrolled {name} with {count} sample(s)."
 
+# ------------------- Face Encoding ------------------- #
+def get_face_encoding(img):
+    """Return the first face encoding, or None if fails"""
+    try:
+        encs = face_recognition.face_encodings(img)
+        if encs:
+            return encs[0]
+    except Exception as e:
+        logger.error(f"Face encoding failed: {e}")
+    return None
 
 # ------------------- Face Checking ------------------- #
 def is_face_already_enrolled(new_faces: list[np.ndarray], dist_threshold: float = 0.6):
-    """
-    Check if a face is already enrolled using face_recognition.
-    Returns (True, id_number, distance) if match found
-    """
+    """Check if a face is already enrolled"""
     known_faces = {}
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
+
     for filename in os.listdir(DATASET_DIR):
         if not filename.lower().endswith(".jpg"):
             continue
@@ -130,27 +145,25 @@ def is_face_already_enrolled(new_faces: list[np.ndarray], dist_threshold: float 
             continue
         id_number = parts[1]
         if id_number not in known_faces:
-            cur.execute("SELECT name, id_number FROM people WHERE id_number=?", (id_number,))
+            cur.execute("SELECT name FROM people WHERE id_number=?", (id_number,))
             row = cur.fetchone()
             if not row:
                 continue
-            name, id_num = row
-            known_faces[id_number] = {"name": name, "encodings": []}
+            known_faces[id_number] = {"name": row[0], "encodings": []}
 
         img_path = os.path.join(DATASET_DIR, filename)
         img = face_recognition.load_image_file(img_path)
-        encs = face_recognition.face_encodings(img)
-        if encs:
-            known_faces[id_number]["encodings"].append(encs[0])
+        enc = get_face_encoding(img)
+        if enc is not None:
+            known_faces[id_number]["encodings"].append(enc)
+
     conn.close()
 
-    # Compare new faces to known faces
+    # Compare new faces
     for face_img in new_faces:
-        encs = face_recognition.face_encodings(face_img)
-        if not encs:
+        face_encoding = get_face_encoding(face_img)
+        if face_encoding is None:
             continue
-        face_encoding = encs[0]
-
         for id_number, info in known_faces.items():
             if not info["encodings"]:
                 continue
@@ -160,12 +173,9 @@ def is_face_already_enrolled(new_faces: list[np.ndarray], dist_threshold: float 
                 return True, id_number, min_dist
     return False, None, None
 
-
 # ------------------- Deletion ------------------- #
 def delete_face_by_id(id_number: str):
-    """
-    Deletes all faces and DB entry for a given id_number
-    """
+    """Delete all faces and DB entry for a given id_number"""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT id, name FROM people WHERE id_number=?", (id_number,))
@@ -175,20 +185,18 @@ def delete_face_by_id(id_number: str):
         return False, "ID not found in database."
     person_id, name = row
 
-    # Delete dataset images
     deleted_count = 0
     for file in os.listdir(DATASET_DIR):
         if file.startswith(f"user.{id_number}."):
             os.remove(os.path.join(DATASET_DIR, file))
             deleted_count += 1
 
-    # Delete DB record
     cur.execute("DELETE FROM people WHERE id_number=?", (id_number,))
     conn.commit()
     conn.close()
 
+    logger.info(f"Deleted {name} ({id_number}) with {deleted_count} images.")
     return True, f"Deleted {name} ({id_number}) with {deleted_count} images."
-
 
 # ------------------- Clear All ------------------- #
 def clear_all_faces():
@@ -201,4 +209,5 @@ def clear_all_faces():
     for file in os.listdir(DATASET_DIR):
         os.remove(os.path.join(DATASET_DIR, file))
 
+    logger.info("All faces, dataset images, and database entries cleared.")
     return {"success": True, "message": "All faces, dataset images, and database entries cleared."}
