@@ -17,30 +17,33 @@ def load_known_faces():
     for filename in os.listdir(DATASET_DIR):
         if not filename.lower().endswith(".jpg"):
             continue
+
         parts = filename.split(".")
         if len(parts) < 3:
+            print(f"[WARN] Skipping invalid filename: {filename}")
             continue
-        person_id = int(parts[1])
+
+        person_id = parts[1]  # keep as string, works for both numeric and non-numeric
 
         if person_id not in known_faces:
-            cur.execute("SELECT name, id_number FROM people WHERE id=?", (person_id,))
+            # Try to fetch person info using id (convert if numeric)
+            try:
+                cur.execute("SELECT name, id_number FROM people WHERE id=?", (int(person_id),))
+            except ValueError:
+                # fallback: use id_number as string
+                cur.execute("SELECT name, id_number FROM people WHERE id_number=?", (person_id,))
             row = cur.fetchone()
             if not row:
+                print(f"[WARN] No DB entry for person_id: {person_id}")
                 continue
             name, id_number = row
             known_faces[person_id] = {"name": name, "id_number": id_number, "encodings": []}
 
         img_path = os.path.join(DATASET_DIR, filename)
-        try:
-            img = face_recognition.load_image_file(img_path)
-            encs = face_recognition.face_encodings(img)
-            if not encs:
-                print(f"[WARN] No face found in {filename}, skipping.")
-                continue
+        img = face_recognition.load_image_file(img_path)
+        encs = face_recognition.face_encodings(img)
+        if encs:
             known_faces[person_id]["encodings"].append(encs[0])
-        except Exception as e:
-            print(f"[ERROR] Failed to process {filename}: {e}")
-            continue
 
     conn.close()
     print("[DEBUG] Loaded known faces:", len(known_faces))
