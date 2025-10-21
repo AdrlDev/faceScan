@@ -75,33 +75,27 @@ async def delete_face_api(req: ScanDeleteRequest):
         raise HTTPException(status_code=400, detail="No images provided for scanning.")
 
     # Step 1: Load stored face encoding for this ID
-    stored_encoding = get_stored_face_encoding(req.id_number)
-    if stored_encoding is None:
+    stored_encodings = get_stored_face_encoding(req.id_number)
+    if not stored_encodings:
         raise HTTPException(status_code=404, detail="No stored face found for this ID.")
 
     # Step 2: Process and match uploaded face(s)
     match_found = False
     for img_b64 in req.images_base64:
-        try:
-            img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
-            img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
-            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
+        img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        encodings = face_recognition.face_encodings(rgb_img)
+        if not encodings:
+            continue
 
-            # Detect face encodings in uploaded image
-            encodings = face_recognition.face_encodings(rgb_img)
-            if not encodings:
-                print("⚠️ No face detected in uploaded image.")
-                continue
-
-            # Compare all faces found with stored encoding
-            results = face_recognition.compare_faces([stored_encoding], encodings[0], tolerance=0.45)
+        for stored in stored_encodings:
+            results = face_recognition.compare_faces([stored], encodings[0], tolerance=0.45)
             if results[0]:
                 match_found = True
                 break
-
-        except Exception as e:
-            print(f"❌ Failed to process image: {e}")
-            continue
+        if match_found:
+            break
 
     if not match_found:
         return {"success": False, "message": "No matching face found. Deletion cancelled."}
