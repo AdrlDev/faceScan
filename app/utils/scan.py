@@ -5,10 +5,14 @@ import cv2
 import numpy as np
 import face_recognition
 import datetime
+from datetime import timezone, timedelta
 import sqlite3
 from .face_utils import DATASET_DIR, DB_PATH
 
 DIST_THRESHOLD = 0.6
+
+# Philippine timezone (UTC+8)
+PH_TZ = timezone(timedelta(hours=8))
 
 def load_known_faces():
     """
@@ -85,6 +89,10 @@ def scan_once(images_base64: list[str]):
                     info = known_faces[best_match_id]
                     confidence = 1.0 - best_distance
                     status = "ok" if confidence > 0.8 else "low_confidence"
+
+                    # 🕒 Localized timestamp (Philippine Time)
+                    ph_time = datetime.datetime.now(PH_TZ).isoformat()
+
                     return {
                         "status": status,
                         "person_id": best_match_id,
@@ -92,7 +100,7 @@ def scan_once(images_base64: list[str]):
                         "id_number": info["id_number"],
                         "distance": float(best_distance),
                         "message": f"Recognized {info['name']} with confidence {confidence:.2f}",
-                        "timestamp": datetime.datetime.now().isoformat()
+                        "timestamp": ph_time
                     }
         except Exception as e:
             return {"status": "error", "message": str(e)}
