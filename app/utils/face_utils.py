@@ -211,3 +211,18 @@ def clear_all_faces():
 
     logger.info("All faces, dataset images, and database entries cleared.")
     return {"success": True, "message": "All faces, dataset images, and database entries cleared."}
+
+def get_stored_face_encoding(id_number: str):
+    """
+    Loads all stored face encodings for a given ID number
+    by reading the corresponding images from the dataset directory.
+    """
+    encodings = []
+    for file in os.listdir(DATASET_DIR):
+        if file.startswith(f"user.{id_number}.") and file.lower().endswith(".jpg"):
+            img_path = os.path.join(DATASET_DIR, file)
+            img = face_recognition.load_image_file(img_path)
+            enc = get_face_encoding(img)
+            if enc is not None:
+                encodings.append(enc)
+    return encodings if encodings else None

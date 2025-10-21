@@ -4,9 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import cv2
 import numpy as np
+import face_recognition
 from app.utils.enroll import enroll_face
 from app.utils.scan import scan_once
-from app.utils.face_utils import clear_all_faces, delete_face_by_id, cancel_enrollment, start_enrollment, cancel_scan, start_scan
+from app.utils.face_utils import clear_all_faces, get_stored_face_encoding, delete_face_by_id, cancel_enrollment, start_enrollment, cancel_scan, start_scan
 
 app = FastAPI()
 
@@ -73,21 +74,39 @@ async def delete_face_api(req: ScanDeleteRequest):
     if not req.images_base64:
         raise HTTPException(status_code=400, detail="No images provided for scanning.")
 
-    gray_faces = []
+    # Step 1: Load stored face encoding for this ID
+    stored_encoding = get_stored_face_encoding(req.id_number)
+    if stored_encoding is None:
+        raise HTTPException(status_code=404, detail="No stored face found for this ID.")
+
+    # Step 2: Process and match uploaded face(s)
+    match_found = False
     for img_b64 in req.images_base64:
         try:
             img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
             img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            gray_faces.append(gray)
+            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+            # Detect face encodings in uploaded image
+            encodings = face_recognition.face_encodings(rgb_img)
+            if not encodings:
+                print("⚠️ No face detected in uploaded image.")
+                continue
+
+            # Compare all faces found with stored encoding
+            results = face_recognition.compare_faces([stored_encoding], encodings[0], tolerance=0.45)
+            if results[0]:
+                match_found = True
+                break
+
         except Exception as e:
-            # Skip invalid images but log
-            print(f"Failed to decode an image: {e}")
+            print(f"❌ Failed to process image: {e}")
             continue
 
-    if not gray_faces:
-        return {"success": False, "message": "No valid images could be decoded."}
+    if not match_found:
+        return {"success": False, "message": "No matching face found. Deletion cancelled."}
 
+    # Step 3: Proceed with deletion if face matches
     try:
         success, message = delete_face_by_id(req.id_number)
         return {"success": success, "message": message}
