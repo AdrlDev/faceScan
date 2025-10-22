@@ -7,7 +7,7 @@ import numpy as np
 import face_recognition
 from app.utils.enroll import enroll_face
 from app.utils.scan import scan_once
-from app.utils.face_utils import clear_all_faces, get_stored_face_encoding, delete_face_by_id, cancel_enrollment, start_enrollment, cancel_scan, start_scan, align_face
+from app.utils.face_utils import clear_all_faces, get_stored_face_encoding, logger, delete_face_by_id, cancel_enrollment, start_enrollment, cancel_scan, start_scan, align_face
 
 app = FastAPI()
 
@@ -71,54 +71,62 @@ async def clear_faces_api():
 
 @app.post("/api/delete-face")
 async def delete_face_api(req: ScanDeleteRequest):
+    """Delete a user's enrolled face if it matches the uploaded image(s)."""
     if not req.images_base64:
         raise HTTPException(status_code=400, detail="No images provided for scanning.")
 
-    # Step 1: Load stored face encoding for this ID
+    # Step 1️⃣: Load stored encodings for the provided ID
     stored_encodings = get_stored_face_encoding(req.id_number)
     if not stored_encodings:
-        raise HTTPException(status_code=404, detail="No stored face found for this ID.")
+        raise HTTPException(status_code=404, detail=f"No stored face found for ID {req.id_number}.")
 
-    # Step 2: Process and match uploaded face(s)
+    # Step 2️⃣: Match uploaded face(s) against stored encodings
     match_found = False
     for img_b64 in req.images_base64:
-        img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
-        img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
-        if img is None:
-            continue
-
-        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb_img)
-        if not face_locations:
-            continue
-
-        for (top, right, bottom, left) in face_locations:
-            face_img = rgb_img[top:bottom, left:right]
-            aligned_face = align_face(face_img)
-            if aligned_face is None:
+        try:
+            img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
+            img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
+            if img is None:
                 continue
 
-            encodings = face_recognition.face_encodings(aligned_face)
-            if not encodings:
+            rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            face_locations = face_recognition.face_locations(rgb_img)
+            if not face_locations:
                 continue
 
-            new_encoding = encodings[0]
-            for stored in stored_encodings:
-                results = face_recognition.compare_faces([stored], new_encoding, tolerance=0.45)
-                if results[0]:
-                    match_found = True
+            for (top, right, bottom, left) in face_locations:
+                face_img = rgb_img[top:bottom, left:right]
+                aligned_face = align_face(face_img)
+                if aligned_face is None:
+                    continue
+
+                encodings = face_recognition.face_encodings(aligned_face)
+                if not encodings:
+                    continue
+
+                new_encoding = encodings[0]
+                for stored in stored_encodings:
+                    results = face_recognition.compare_faces([stored], new_encoding, tolerance=0.45)
+                    if results[0]:
+                        match_found = True
+                        break
+                if match_found:
                     break
             if match_found:
                 break
-        if match_found:
-            break
 
+        except Exception as e:
+            logger.warning(f"Error processing uploaded image: {e}")
+            continue
+
+    # Step 3️⃣: Handle no match
     if not match_found:
         return {"success": False, "message": "No matching face found. Deletion cancelled."}
 
-    # Step 3: Proceed with deletion if face matches
+    # Step 4️⃣: Proceed with deletion if match found
     try:
         success, message = delete_face_by_id(req.id_number)
         return {"success": success, "message": message}
     except Exception as e:
+        logger.error(f"Error during deletion: {e}")
         return {"success": False, "message": f"Error during deletion: {e}"}

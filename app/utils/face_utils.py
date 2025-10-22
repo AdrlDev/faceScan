@@ -172,7 +172,9 @@ def is_face_already_enrolled(decoded_faces, threshold=0.45):
 
 # ------------------- Deletion ------------------- #
 def delete_face_by_id(id_number: str):
-    """Delete all enrolled face images, encodings, and DB entry for the given id_number."""
+    """
+    Delete all enrolled face images, encoding files, and DB entry for a given id_number.
+    """
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT name FROM people WHERE id_number=?", (id_number,))
@@ -185,18 +187,17 @@ def delete_face_by_id(id_number: str):
     name = row[0]
     deleted_count = 0
 
-    # --- Delete all dataset face images ---
+    # --- Delete dataset images ---
     for file in os.listdir(DATASET_DIR):
-        # Normalize both to string for safety
-        if file.startswith(f"user.{str(id_number)}."):
+        if file.startswith(f"user.{id_number}."):
             file_path = os.path.join(DATASET_DIR, file)
             try:
                 os.remove(file_path)
                 deleted_count += 1
             except Exception as e:
-                logger.warning(f"Failed to delete {file_path}: {e}")
+                logger.warning(f"Failed to delete image {file_path}: {e}")
 
-    # --- Delete .npy encodings (if exist) ---
+    # --- Delete encoding file ---
     npy_path = os.path.join(CONFIG_DIR, f"{id_number}_encodings.npy")
     if os.path.exists(npy_path):
         try:
@@ -205,12 +206,12 @@ def delete_face_by_id(id_number: str):
         except Exception as e:
             logger.warning(f"Failed to delete encoding file {npy_path}: {e}")
 
-    # --- Remove from database ---
+    # --- Delete DB entry ---
     cur.execute("DELETE FROM people WHERE id_number=?", (id_number,))
     conn.commit()
     conn.close()
 
-    logger.info(f"Deleted {name} ({id_number}) with {deleted_count} images.")
+    logger.info(f"Deleted {name} ({id_number}) with {deleted_count} image(s).")
     return True, f"Deleted {name} ({id_number}) with {deleted_count} image(s)."
 
 # ------------------- Clear All ------------------- #
@@ -249,58 +250,47 @@ def clear_all_faces():
 
 def get_stored_face_encoding(id_number: str):
     """
-    Load stored face encodings for a specific ID.
-    Automatically normalizes encodings for consistent comparison.
+    Load stored face encodings for a given ID.
+    Tries .npy cache first, then rebuilds from dataset images if needed.
+    Returns a list of numpy arrays (encodings) or an empty list.
     """
     encodings = []
+    npy_path = os.path.join(CONFIG_DIR, f"{id_number}_encodings.npy")
 
-    # 1️⃣ Check if pre-saved .npy encodings exist
-    npy_path = os.path.join("config", f"{id_number}_encodings.npy")
+    # 1️⃣ Try loading from .npy cache for speed
     if os.path.exists(npy_path):
         try:
-            encs = np.load(npy_path, allow_pickle=True)
-            # Normalize embeddings (unit length)
-            for enc in encs:
-                norm = np.linalg.norm(enc)
-                if norm > 0:
-                    encodings.append(enc / norm)
+            encodings = np.load(npy_path, allow_pickle=True).tolist()
+            if encodings:
+                logger.info(f"Loaded {len(encodings)} encodings from {npy_path}")
+                return encodings
+            else:
+                logger.warning(f"Encoding file {npy_path} is empty.")
         except Exception as e:
-            print(f"[ERROR] Loading encodings for {id_number}: {e}")
-        return encodings
+            logger.warning(f"Failed to load encodings from {npy_path}: {e}")
 
-    # 2️⃣ Fallback: reconstruct from dataset images
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT name FROM people WHERE id_number=?", (id_number,))
-    if not cur.fetchone():
-        conn.close()
-        return []
-    conn.close()
+    # 2️⃣ Fallback — Rebuild from dataset images
+    logger.info(f"Rebuilding encodings for ID {id_number} from dataset...")
+    for file in os.listdir(DATASET_DIR):
+        if file.startswith(f"user.{id_number}.") and file.lower().endswith(".jpg"):
+            img_path = os.path.join(DATASET_DIR, file)
+            try:
+                img = face_recognition.load_image_file(img_path)
+                encs = face_recognition.face_encodings(img)
+                if encs:
+                    encodings.append(encs[0])
+            except Exception as e:
+                logger.warning(f"Failed to process {img_path}: {e}")
 
-    for filename in os.listdir(DATASET_DIR):
-        if not filename.lower().endswith(".jpg"):
-            continue
-        parts = filename.split(".")
-        if len(parts) < 3:
-            continue
-        file_id = parts[1]
-        if file_id != id_number:
-            continue
-
-        img_path = os.path.join(DATASET_DIR, filename)
+    # 3️⃣ Cache rebuilt encodings for future scans
+    if encodings:
         try:
-            img = face_recognition.load_image_file(img_path)
-            encs = face_recognition.face_encodings(img)
-            if encs:
-                enc = encs[0]
-                norm = np.linalg.norm(enc)
-                if norm > 0:
-                    enc = enc / norm
-                encodings.append(enc)
+            np.save(npy_path, np.array(encodings, dtype=object))
+            logger.info(f"Cached {len(encodings)} new encodings to {npy_path}")
         except Exception as e:
-            print(f"[ERROR] Encoding {filename}: {e}")
-            continue
+            logger.warning(f"Failed to save encodings to {npy_path}: {e}")
 
+    logger.info(f"Loaded {len(encodings)} total encodings for ID {id_number}")
     return encodings
 
 def align_face(face_img: np.ndarray):
