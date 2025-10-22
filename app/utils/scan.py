@@ -8,7 +8,7 @@ from datetime import timezone, timedelta
 import sqlite3
 from .face_utils import DATASET_DIR, DB_PATH, align_face
 
-DIST_THRESHOLD = 0.6
+DIST_THRESHOLD = 0.5
 PH_TZ = timezone(timedelta(hours=8))  # Philippine Timezone
 
 def load_known_faces():
@@ -97,7 +97,7 @@ def scan_once(images_base64: list[str]):
                 if best_match_id is not None and best_distance <= DIST_THRESHOLD:
                     info = known_faces[best_match_id]
                     confidence = 1.0 - best_distance
-                    status = "ok" if confidence > 0.8 else "low_confidence"
+                    status = "ok" if confidence > 0.6 else "low_confidence"
 
                     ph_time = datetime.datetime.now(PH_TZ).isoformat()
 
