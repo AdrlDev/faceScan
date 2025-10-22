@@ -7,7 +7,7 @@ import numpy as np
 import face_recognition
 from app.utils.enroll import enroll_face
 from app.utils.scan import scan_once
-from app.utils.face_utils import clear_all_faces, get_stored_face_encoding, delete_face_by_id, cancel_enrollment, start_enrollment, cancel_scan, start_scan
+from app.utils.face_utils import clear_all_faces, get_stored_face_encoding, delete_face_by_id, cancel_enrollment, start_enrollment, cancel_scan, start_scan, align_face
 
 app = FastAPI()
 
@@ -84,15 +84,31 @@ async def delete_face_api(req: ScanDeleteRequest):
     for img_b64 in req.images_base64:
         img_data = np.frombuffer(base64.b64decode(img_b64), np.uint8)
         img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
-        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        encodings = face_recognition.face_encodings(rgb_img)
-        if not encodings:
+        if img is None:
             continue
 
-        for stored in stored_encodings:
-            results = face_recognition.compare_faces([stored], encodings[0], tolerance=0.45)
-            if results[0]:
-                match_found = True
+        rgb_img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        face_locations = face_recognition.face_locations(rgb_img)
+        if not face_locations:
+            continue
+
+        for (top, right, bottom, left) in face_locations:
+            face_img = rgb_img[top:bottom, left:right]
+            aligned_face = align_face(face_img)
+            if aligned_face is None:
+                continue
+
+            encodings = face_recognition.face_encodings(aligned_face)
+            if not encodings:
+                continue
+
+            new_encoding = encodings[0]
+            for stored in stored_encodings:
+                results = face_recognition.compare_faces([stored], new_encoding, tolerance=0.45)
+                if results[0]:
+                    match_found = True
+                    break
+            if match_found:
                 break
         if match_found:
             break

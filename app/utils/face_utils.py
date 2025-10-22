@@ -131,12 +131,13 @@ def get_face_encoding(img):
     return None
 
 # ------------------- Face Checking ------------------- #
-def is_face_already_enrolled(new_faces: list[np.ndarray], dist_threshold: float = 0.6):
+def is_face_already_enrolled(decoded_faces: list[np.ndarray], dist_threshold: float = 0.6):
     """Check if a face is already enrolled"""
     known_faces = {}
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
+    # Load known faces from dataset
     for filename in os.listdir(DATASET_DIR):
         if not filename.lower().endswith(".jpg"):
             continue
@@ -159,8 +160,8 @@ def is_face_already_enrolled(new_faces: list[np.ndarray], dist_threshold: float 
 
     conn.close()
 
-    # Compare new faces
-    for face_img in new_faces:
+    # Compare new decoded faces to known encodings
+    for face_img in decoded_faces:
         face_encoding = get_face_encoding(face_img)
         if face_encoding is None:
             continue
@@ -171,6 +172,7 @@ def is_face_already_enrolled(new_faces: list[np.ndarray], dist_threshold: float 
             min_dist = np.min(distances)
             if min_dist <= dist_threshold:
                 return True, id_number, min_dist
+
     return False, None, None
 
 # ------------------- Deletion ------------------- #
@@ -214,15 +216,88 @@ def clear_all_faces():
 
 def get_stored_face_encoding(id_number: str):
     """
-    Loads all stored face encodings for a given ID number
-    by reading the corresponding images from the dataset directory.
+    Load stored face encodings for a specific ID.
+    Automatically normalizes encodings for consistent comparison.
     """
     encodings = []
-    for file in os.listdir(DATASET_DIR):
-        if file.startswith(f"user.{id_number}.") and file.lower().endswith(".jpg"):
-            img_path = os.path.join(DATASET_DIR, file)
+
+    # 1️⃣ Check if pre-saved .npy encodings exist
+    npy_path = os.path.join("config", f"{id_number}_encodings.npy")
+    if os.path.exists(npy_path):
+        try:
+            encs = np.load(npy_path, allow_pickle=True)
+            # Normalize embeddings (unit length)
+            for enc in encs:
+                norm = np.linalg.norm(enc)
+                if norm > 0:
+                    encodings.append(enc / norm)
+        except Exception as e:
+            print(f"[ERROR] Loading encodings for {id_number}: {e}")
+        return encodings
+
+    # 2️⃣ Fallback: reconstruct from dataset images
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT name FROM people WHERE id_number=?", (id_number,))
+    if not cur.fetchone():
+        conn.close()
+        return []
+    conn.close()
+
+    for filename in os.listdir(DATASET_DIR):
+        if not filename.lower().endswith(".jpg"):
+            continue
+        parts = filename.split(".")
+        if len(parts) < 3:
+            continue
+        file_id = parts[1]
+        if file_id != id_number:
+            continue
+
+        img_path = os.path.join(DATASET_DIR, filename)
+        try:
             img = face_recognition.load_image_file(img_path)
-            enc = get_face_encoding(img)
-            if enc is not None:
+            encs = face_recognition.face_encodings(img)
+            if encs:
+                enc = encs[0]
+                norm = np.linalg.norm(enc)
+                if norm > 0:
+                    enc = enc / norm
                 encodings.append(enc)
-    return encodings if encodings else None
+        except Exception as e:
+            print(f"[ERROR] Encoding {filename}: {e}")
+            continue
+
+    return encodings
+
+def align_face(face_img: np.ndarray):
+    """
+    Align the face using eye landmarks.
+    Returns aligned + resized (150x150) face, or None if alignment fails.
+    """
+    landmarks = face_recognition.face_landmarks(face_img)
+    if not landmarks:
+        return None
+
+    left_eye = np.mean(landmarks[0]['left_eye'], axis=0)
+    right_eye = np.mean(landmarks[0]['right_eye'], axis=0)
+
+    dx = right_eye[0] - left_eye[0]
+    dy = right_eye[1] - left_eye[1]
+    angle = np.degrees(np.arctan2(dy, dx))
+    eyes_center = ((left_eye[0] + right_eye[0]) / 2,
+                   (left_eye[1] + right_eye[1]) / 2)
+
+    M = cv2.getRotationMatrix2D(eyes_center, angle, scale=1)
+    aligned = cv2.warpAffine(face_img, M, (face_img.shape[1], face_img.shape[0]),
+                             flags=cv2.INTER_CUBIC)
+
+    # Crop and resize after alignment
+    face_locations = face_recognition.face_locations(aligned)
+    if not face_locations:
+        return None
+
+    top, right, bottom, left = face_locations[0]
+    aligned_cropped = aligned[top:bottom, left:right]
+    aligned_resized = cv2.resize(aligned_cropped, (150, 150))
+    return aligned_resized
