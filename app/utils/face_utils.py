@@ -177,42 +177,91 @@ def is_face_already_enrolled(decoded_faces: list[np.ndarray], dist_threshold: fl
 
 # ------------------- Deletion ------------------- #
 def delete_face_by_id(id_number: str):
-    """Delete all faces and DB entry for a given id_number"""
+    """Delete all enrolled face images, encodings, and DB entry for the given id_number."""
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-    cur.execute("SELECT id, name FROM people WHERE id_number=?", (id_number,))
+    cur.execute("SELECT name FROM people WHERE id_number=?", (id_number,))
     row = cur.fetchone()
+
     if not row:
         conn.close()
-        return False, "ID not found in database."
-    person_id, name = row
+        return False, f"ID {id_number} not found in database."
 
+    name = row[0]
     deleted_count = 0
-    for file in os.listdir(DATASET_DIR):
-        if file.startswith(f"user.{id_number}."):
-            os.remove(os.path.join(DATASET_DIR, file))
-            deleted_count += 1
 
+    # --- Delete all dataset face images ---
+    for file in os.listdir(DATASET_DIR):
+        # Normalize both to string for safety
+        if file.startswith(f"user.{str(id_number)}."):
+            file_path = os.path.join(DATASET_DIR, file)
+            try:
+                os.remove(file_path)
+                deleted_count += 1
+            except Exception as e:
+                logger.warning(f"Failed to delete {file_path}: {e}")
+
+    # --- Delete .npy encodings (if exist) ---
+    npy_path = os.path.join(CONFIG_DIR, f"{id_number}_encodings.npy")
+    if os.path.exists(npy_path):
+        try:
+            os.remove(npy_path)
+            logger.info(f"Deleted encoding file: {npy_path}")
+        except Exception as e:
+            logger.warning(f"Failed to delete encoding file {npy_path}: {e}")
+
+    # --- Remove from database ---
     cur.execute("DELETE FROM people WHERE id_number=?", (id_number,))
     conn.commit()
     conn.close()
 
     logger.info(f"Deleted {name} ({id_number}) with {deleted_count} images.")
-    return True, f"Deleted {name} ({id_number}) with {deleted_count} images."
+    return True, f"Deleted {name} ({id_number}) with {deleted_count} image(s)."
 
 # ------------------- Clear All ------------------- #
 def clear_all_faces():
+    """
+    Completely delete all enrolled faces, images, encodings, and database records.
+    """
+    deleted_images = 0
+    deleted_encodings = 0
+
+    # --- 1️⃣ Clear database ---
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("DELETE FROM people")
     conn.commit()
     conn.close()
 
+    # --- 2️⃣ Clear dataset images ---
     for file in os.listdir(DATASET_DIR):
-        os.remove(os.path.join(DATASET_DIR, file))
+        file_path = os.path.join(DATASET_DIR, file)
+        try:
+            os.remove(file_path)
+            deleted_images += 1
+        except Exception as e:
+            logger.warning(f"Failed to delete dataset image {file_path}: {e}")
 
-    logger.info("All faces, dataset images, and database entries cleared.")
-    return {"success": True, "message": "All faces, dataset images, and database entries cleared."}
+    # --- 3️⃣ Clear encoding files (.npy) ---
+    for file in os.listdir(CONFIG_DIR):
+        if file.endswith("_encodings.npy"):
+            file_path = os.path.join(CONFIG_DIR, file)
+            try:
+                os.remove(file_path)
+                deleted_encodings += 1
+            except Exception as e:
+                logger.warning(f"Failed to delete encoding file {file_path}: {e}")
+
+    # --- 4️⃣ Logging and response ---
+    logger.info(f"Cleared all face data: {deleted_images} images, {deleted_encodings} encoding files, and all DB records.")
+
+    return {
+        "success": True,
+        "message": (
+            f"Cleared all face data — "
+            f"{deleted_images} image(s), {deleted_encodings} encoding file(s), and all database records removed."
+        )
+    }
 
 def get_stored_face_encoding(id_number: str):
     """
