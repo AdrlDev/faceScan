@@ -30,9 +30,11 @@ def enroll_face(name: str, id_number: str, images_base64: list[str]):
     if not decoded_faces:
         return {"success": False, "message": "No valid image frames"}
 
-    # Check for duplicates
+    # --- Improved duplicate check ---
     already_enrolled, matched_id, dist = is_face_already_enrolled(decoded_faces)
-    if already_enrolled:
+
+    # Only treat as duplicate if it's a *different* user (not same id_number)
+    if already_enrolled and matched_id != id_number:
         return {
             "success": False,
             "message": f"Face already enrolled under ID {matched_id} (distance={dist:.3f})"

@@ -131,49 +131,44 @@ def get_face_encoding(img):
     return None
 
 # ------------------- Face Checking ------------------- #
-def is_face_already_enrolled(decoded_faces: list[np.ndarray], dist_threshold: float = 0.6):
-    """Check if a face is already enrolled"""
-    known_faces = {}
+def is_face_already_enrolled(decoded_faces, threshold=0.45):
+    """
+    Checks if any of the given decoded faces match an already enrolled user's face.
+    Returns (True, matched_id, distance) if duplicate is found.
+    """
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
-
-    # Load known faces from dataset
-    for filename in os.listdir(DATASET_DIR):
-        if not filename.lower().endswith(".jpg"):
-            continue
-        parts = filename.split(".")
-        if len(parts) < 3:
-            continue
-        id_number = parts[1]
-        if id_number not in known_faces:
-            cur.execute("SELECT name FROM people WHERE id_number=?", (id_number,))
-            row = cur.fetchone()
-            if not row:
-                continue
-            known_faces[id_number] = {"name": row[0], "encodings": []}
-
-        img_path = os.path.join(DATASET_DIR, filename)
-        img = face_recognition.load_image_file(img_path)
-        enc = get_face_encoding(img)
-        if enc is not None:
-            known_faces[id_number]["encodings"].append(enc)
-
+    cur.execute("SELECT id_number FROM people")
+    ids = [row[0] for row in cur.fetchall()]
     conn.close()
 
-    # Compare new decoded faces to known encodings
-    for face_img in decoded_faces:
-        face_encoding = get_face_encoding(face_img)
-        if face_encoding is None:
+    # Go through all registered users
+    for existing_id in ids:
+        enc_path = os.path.join(CONFIG_DIR, f"{existing_id}_encodings.npy")
+        if not os.path.exists(enc_path):
             continue
-        for id_number, info in known_faces.items():
-            if not info["encodings"]:
-                continue
-            distances = face_recognition.face_distance(info["encodings"], face_encoding)
-            min_dist = np.min(distances)
-            if min_dist <= dist_threshold:
-                return True, id_number, min_dist
 
-    return False, None, None
+        try:
+            known_encodings = np.load(enc_path)
+        except Exception as e:
+            print(f"[WARN] Skipping {existing_id}: failed to load encodings ({e})")
+            continue
+
+        # Compare with each provided face
+        for rgb in decoded_faces:
+            new_encs = face_recognition.face_encodings(rgb)
+            if not new_encs:
+                continue
+            new_enc = new_encs[0]
+
+            distances = face_recognition.face_distance(known_encodings, new_enc)
+            min_dist = np.min(distances)
+
+            if min_dist < threshold:
+                # Duplicate found
+                return True, existing_id, float(min_dist)
+
+    return False, None, 1.0
 
 # ------------------- Deletion ------------------- #
 def delete_face_by_id(id_number: str):
@@ -221,46 +216,35 @@ def delete_face_by_id(id_number: str):
 # ------------------- Clear All ------------------- #
 def clear_all_faces():
     """
-    Completely delete all enrolled faces, images, encodings, and database records.
+    Deletes all enrolled users, dataset images, and face encoding files.
+    Keeps the database schema intact but clears its data.
     """
-    deleted_images = 0
-    deleted_encodings = 0
-
-    # --- 1️⃣ Clear database ---
+    # 1️⃣ Clear database
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("DELETE FROM people")
     conn.commit()
     conn.close()
 
-    # --- 2️⃣ Clear dataset images ---
+    # 2️⃣ Remove all dataset images (user.ID.jpg)
+    dataset_deleted = 0
     for file in os.listdir(DATASET_DIR):
         file_path = os.path.join(DATASET_DIR, file)
-        try:
+        if os.path.isfile(file_path):
             os.remove(file_path)
-            deleted_images += 1
-        except Exception as e:
-            logger.warning(f"Failed to delete dataset image {file_path}: {e}")
+            dataset_deleted += 1
 
-    # --- 3️⃣ Clear encoding files (.npy) ---
+    # 3️⃣ Remove all saved encodings (*.npy)
+    encoding_deleted = 0
     for file in os.listdir(CONFIG_DIR):
         if file.endswith("_encodings.npy"):
-            file_path = os.path.join(CONFIG_DIR, file)
-            try:
-                os.remove(file_path)
-                deleted_encodings += 1
-            except Exception as e:
-                logger.warning(f"Failed to delete encoding file {file_path}: {e}")
+            os.remove(os.path.join(CONFIG_DIR, file))
+            encoding_deleted += 1
 
-    # --- 4️⃣ Logging and response ---
-    logger.info(f"Cleared all face data: {deleted_images} images, {deleted_encodings} encoding files, and all DB records.")
-
+    logger.info(f"Cleared all faces: {dataset_deleted} images, {encoding_deleted} encodings, and all DB entries.")
     return {
         "success": True,
-        "message": (
-            f"Cleared all face data — "
-            f"{deleted_images} image(s), {deleted_encodings} encoding file(s), and all database records removed."
-        )
+        "message": f"Cleared all faces — {dataset_deleted} images, {encoding_deleted} encodings, and all DB entries."
     }
 
 def get_stored_face_encoding(id_number: str):
