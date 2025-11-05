@@ -107,12 +107,13 @@ def load_known_faces():
 # ------------------- Face Checking ------------------- #
 def is_face_already_enrolled(face_encodings_list: list, current_id: str = None) -> tuple[bool, str, float]: # type: ignore
     """
-    Check if face encodings match any existing enrolled users
+    Check if face encodings match any existing enrolled users with stricter threshold
     Returns: (is_enrolled, matched_id, best_distance)
     """
-    THRESHOLD = 0.45  # stricter distance threshold to avoid false positives
-    MIN_MATCHES = 2   # require at least 2 frames to match same existing ID
-
+    STRICT_THRESHOLD = 0.4  # Lower threshold = stricter matching (default was 0.45)
+    MIN_MATCHES = 3        # Require more matching frames (default was 2)
+    MIN_MATCH_RATIO = 0.6  # At least 60% of frames should match
+    
     matched_id = None
     best_dist = None
     matches = {}
@@ -121,29 +122,37 @@ def is_face_already_enrolled(face_encodings_list: list, current_id: str = None) 
         if not fn.endswith("_encodings.npy"):
             continue
         existing_id = fn.replace("_encodings.npy", "")
+        if existing_id == current_id:  # Skip self-comparison
+            continue
+            
         try:
             existing = np.load(os.path.join(CONFIG_DIR, fn), allow_pickle=True)
+            match_count = 0
+            min_distance = float('inf')
+            
+            # Compare each new encoding against all stored encodings
+            for new_enc in face_encodings_list:
+                if existing.size == 0:
+                    continue
+                dists = face_recognition.face_distance(existing, new_enc)
+                if dists.size == 0:
+                    continue
+                d = float(np.min(dists))
+                if d < STRICT_THRESHOLD:
+                    match_count += 1
+                min_distance = min(min_distance, d)
+            
+            # Calculate match ratio
+            match_ratio = match_count / len(face_encodings_list)
+            
+            if match_count >= MIN_MATCHES and match_ratio >= MIN_MATCH_RATIO:
+                if best_dist is None or min_distance < best_dist:
+                    matched_id = existing_id
+                    best_dist = min_distance
+
         except Exception as e:
             print(f"[WARN] Could not load encodings {fn}: {e}")
             continue
-            
-        for new_enc in face_encodings_list:
-            if existing.size == 0:
-                continue
-            dists = face_recognition.face_distance(existing, new_enc)
-            if dists.size == 0:
-                continue
-            min_d = float(np.min(dists))
-            if min_d < THRESHOLD:
-                matches[existing_id] = matches.get(existing_id, 0) + 1
-                if best_dist is None or min_d < best_dist:
-                    best_dist = min_d
-
-    # decide duplicate if any existing id has enough matching frames
-    for eid, cnt in matches.items():
-        if cnt >= MIN_MATCHES and eid != current_id:
-            matched_id = eid
-            break
 
     return (matched_id is not None, matched_id, best_dist or float('inf')) # type: ignore
 
