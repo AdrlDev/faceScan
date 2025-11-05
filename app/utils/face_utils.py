@@ -34,9 +34,6 @@ def cancel_scan():
     scanning_active = False
     return {"success": True, "message": "Scan process canceled."}
 
-def is_scanning_active():
-    return scanning_active
-
 def start_enrollment():
     global enrollment_active
     enrollment_active = True
@@ -45,9 +42,6 @@ def cancel_enrollment():
     global enrollment_active
     enrollment_active = False
     return {"success": True, "message": "Enrollment process canceled."}
-
-def is_enrollment_active():
-    return enrollment_active
 
 # ------------------- Database ------------------- #
 def init_db():
@@ -78,97 +72,80 @@ def init_db():
 # Ensure DB exists on import
 init_db()
 
-def is_user_enrolled(id_number: str) -> bool:
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM people WHERE id_number=?", (id_number,))
-    exists = cur.fetchone()[0] > 0
-    conn.close()
-    return exists
-
-# ------------------- Enrollment ------------------- #
-def enroll(name: str, id_number: str, rgb_faces: list[np.ndarray]):
-    """
-    Enroll faces using face_recognition.
-    rgb_faces: list of RGB images (numpy arrays) of faces
-    """
-    global enrollment_active
-    if not enrollment_active:
-        return False, "Enrollment canceled."
-
+def load_known_faces():
+    """Load all enrolled face encodings from dataset directory."""
+    known_faces = {}
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
 
-    if not is_user_enrolled(id_number):
-        cur.execute("INSERT INTO people (name, id_number) VALUES (?, ?)", (name, id_number))
-        conn.commit()
-    else:
-        logger.info(f"User {id_number} already enrolled")
+    for filename in os.listdir(DATASET_DIR):
+        if not filename.lower().endswith(".jpg"):
+            continue
+        parts = filename.split(".")
+        if len(parts) < 3:
+            continue
 
-    # Save face images
-    count = 0
-    for img in rgb_faces:
-        if not enrollment_active:
-            return False, "Enrollment canceled mid-process."
-        path = os.path.join(DATASET_DIR, f"user.{id_number}.{count}.jpg")
-        rgb_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(path, rgb_bgr)
-        count += 1
+        person_id = parts[1]
+        if person_id not in known_faces:
+            cur.execute("SELECT name, id_number FROM people WHERE id_number=?", (person_id,))
+            row = cur.fetchone()
+            if not row:
+                continue
+            name, id_number = row
+            known_faces[person_id] = {"name": name, "id_number": id_number, "encodings": []}
 
-    conn.close()
-    logger.info(f"Enrolled {name} with {count} sample(s).")
-    return True, f"Enrolled {name} with {count} sample(s)."
-
-# ------------------- Face Encoding ------------------- #
-def get_face_encoding(img):
-    """Return the first face encoding, or None if fails"""
-    try:
+        img_path = os.path.join(DATASET_DIR, filename)
+        img = face_recognition.load_image_file(img_path)
         encs = face_recognition.face_encodings(img)
         if encs:
-            return encs[0]
-    except Exception as e:
-        logger.error(f"Face encoding failed: {e}")
-    return None
+            known_faces[person_id]["encodings"].append(encs[0])
+
+    conn.close()
+    print("[DEBUG] Loaded known faces:", len(known_faces))
+    return known_faces
 
 # ------------------- Face Checking ------------------- #
-def is_face_already_enrolled(decoded_faces, threshold=0.45):
+def is_face_already_enrolled(face_encodings_list: list, current_id: str = None) -> tuple[bool, str, float]: # type: ignore
     """
-    Checks if any of the given decoded faces match an already enrolled user's face.
-    Returns (True, matched_id, distance) if duplicate is found.
+    Check if face encodings match any existing enrolled users
+    Returns: (is_enrolled, matched_id, best_distance)
     """
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-    cur.execute("SELECT id_number FROM people")
-    ids = [row[0] for row in cur.fetchall()]
-    conn.close()
+    THRESHOLD = 0.45  # stricter distance threshold to avoid false positives
+    MIN_MATCHES = 2   # require at least 2 frames to match same existing ID
 
-    # Go through all registered users
-    for existing_id in ids:
-        enc_path = os.path.join(CONFIG_DIR, f"{existing_id}_encodings.npy")
-        if not os.path.exists(enc_path):
+    matched_id = None
+    best_dist = None
+    matches = {}
+    
+    for fn in os.listdir(CONFIG_DIR):
+        if not fn.endswith("_encodings.npy"):
             continue
-
+        existing_id = fn.replace("_encodings.npy", "")
         try:
-            known_encodings = np.load(enc_path)
+            existing = np.load(os.path.join(CONFIG_DIR, fn), allow_pickle=True)
         except Exception as e:
-            print(f"[WARN] Skipping {existing_id}: failed to load encodings ({e})")
+            print(f"[WARN] Could not load encodings {fn}: {e}")
             continue
-
-        # Compare with each provided face
-        for rgb in decoded_faces:
-            new_encs = face_recognition.face_encodings(rgb)
-            if not new_encs:
+            
+        for new_enc in face_encodings_list:
+            if existing.size == 0:
                 continue
-            new_enc = new_encs[0]
+            dists = face_recognition.face_distance(existing, new_enc)
+            if dists.size == 0:
+                continue
+            min_d = float(np.min(dists))
+            if min_d < THRESHOLD:
+                matches[existing_id] = matches.get(existing_id, 0) + 1
+                if best_dist is None or min_d < best_dist:
+                    best_dist = min_d
 
-            distances = face_recognition.face_distance(known_encodings, new_enc)
-            min_dist = np.min(distances)
+    # decide duplicate if any existing id has enough matching frames
+    for eid, cnt in matches.items():
+        if cnt >= MIN_MATCHES and eid != current_id:
+            matched_id = eid
+            break
 
-            if min_dist < threshold:
-                # Duplicate found
-                return True, existing_id, float(min_dist)
-
-    return False, None, 1.0
+    return (matched_id is not None, matched_id, best_dist or float('inf')) # type: ignore
 
 # ------------------- Deletion ------------------- #
 def delete_face_by_id(id_number: str):

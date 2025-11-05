@@ -30,16 +30,7 @@ def enroll_face(name: str, id_number: str, images_base64: list[str]):
     if not decoded_faces:
         return {"success": False, "message": "No valid image frames"}
 
-    # --- Improved duplicate check ---
-    already_enrolled, matched_id, dist = is_face_already_enrolled(decoded_faces)
-
-    # Only treat as duplicate if it's a *different* user (not same id_number)
-    if already_enrolled and matched_id != id_number:
-        return {
-            "success": False,
-            "message": f"Face already enrolled under ID {matched_id} (distance={dist:.3f})"
-        }
-
+    # We'll extract encodings first, then check duplicates using aligned encodings
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("SELECT * FROM people WHERE id_number=?", (id_number,))
@@ -82,8 +73,19 @@ def enroll_face(name: str, id_number: str, images_base64: list[str]):
             continue
 
     if image_count == 0:
+        conn.close()
         return {"success": False, "message": "No valid faces detected"}
 
+    # Check for duplicate faces using the extracted encodings
+    is_duplicate, matched_id, best_dist = is_face_already_enrolled(face_encodings_list, id_number)
+    if is_duplicate:
+        conn.close()
+        return {
+            "success": False,
+            "message": f"Face already enrolled under ID {matched_id} (best distance={best_dist:.3f})"
+        }
+
+    # proceed to insert and save encodings
     cur.execute("INSERT INTO people (name, id_number) VALUES (?, ?)", (name, id_number))
     conn.commit()
     conn.close()

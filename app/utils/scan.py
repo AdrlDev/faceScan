@@ -6,42 +6,10 @@ import face_recognition
 import datetime
 from datetime import timezone, timedelta
 import sqlite3
-from .face_utils import DATASET_DIR, DB_PATH, align_face
+from .face_utils import load_known_faces, align_face
 
 DIST_THRESHOLD = 0.5
 PH_TZ = timezone(timedelta(hours=8))  # Philippine Timezone
-
-def load_known_faces():
-    """Load all enrolled face encodings from dataset directory."""
-    known_faces = {}
-    conn = sqlite3.connect(DB_PATH)
-    cur = conn.cursor()
-
-    for filename in os.listdir(DATASET_DIR):
-        if not filename.lower().endswith(".jpg"):
-            continue
-        parts = filename.split(".")
-        if len(parts) < 3:
-            continue
-
-        person_id = parts[1]
-        if person_id not in known_faces:
-            cur.execute("SELECT name, id_number FROM people WHERE id_number=?", (person_id,))
-            row = cur.fetchone()
-            if not row:
-                continue
-            name, id_number = row
-            known_faces[person_id] = {"name": name, "id_number": id_number, "encodings": []}
-
-        img_path = os.path.join(DATASET_DIR, filename)
-        img = face_recognition.load_image_file(img_path)
-        encs = face_recognition.face_encodings(img)
-        if encs:
-            known_faces[person_id]["encodings"].append(encs[0])
-
-    conn.close()
-    print("[DEBUG] Loaded known faces:", len(known_faces))
-    return known_faces
 
 
 def scan_once(images_base64: list[str]):
